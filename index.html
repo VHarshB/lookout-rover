@@ -3,221 +3,217 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#f4f1ea">
-<meta name="description" content="Lookout Rover operator console. Head steering, voice control, and live rover telemetry.">
+<meta name="theme-color" content="#100f1c">
+<meta name="description" content="Lookout Rover operator console. Live head steering, voice control, and rover telemetry.">
 <title>Lookout Rover · Operator console</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ad492d'/%3E%3Cpath d='M8 9v15h16v-5H13V9z' fill='%23fffaf2'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 32'%3E%3Cpath d='M4 8Q8 34 28 19L4 8Zm56 0Q56 34 36 19L60 8Z' fill='none' stroke='%23e6d6fa' stroke-width='4'/%3E%3C/svg%3E">
+<link rel="preload" href="assets/fonts/instrument-sans.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="assets/fonts/ibm-plex-mono.ttf" as="font" type="font/ttf" crossorigin>
 <style>
-/* Lookout Rover — warm instrument console. No external assets or fonts. */
-:root {
-  color-scheme: light;
-  font-family: "Segoe UI", Arial, sans-serif;
-  color: #292d28;
-  background: #f4f1ea;
-  --paper: #fffefa;
-  --line: #ddd9ce;
-  --muted: #686c61;
-  --accent: #ac462b;
-  --green: #28634b;
-}
+@font-face { font-family: 'Instrument Sans'; src: url('assets/fonts/instrument-sans.ttf') format('truetype'); font-weight: 400 700; font-display: swap; }
+@font-face { font-family: 'IBM Plex Mono'; src: url('assets/fonts/ibm-plex-mono.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+:root { color-scheme: dark; font-family: 'Instrument Sans', 'Segoe UI', sans-serif; color: #f5f3fc; background: #100f1c; --muted: #b8b5c9; --lavender: #e6d6fa; --mint: #b6fab7; }
 * { box-sizing: border-box; }
-body { margin: 0; }
-main { width: min(1320px, 100%); padding: 0 36px; margin: auto; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse 53vw 90vh at -5vw 100vh, #4a3678 0%, #422d64 25%, transparent 78%), linear-gradient(110deg, #171223, #100f1c 56%, #0f0d1d); background-attachment: fixed; }
+main { width: min(88.8vw, 1408px); margin: auto; }
 h1, h2, h3, p, dl, dd { margin: 0; }
 button, summary { -webkit-tap-highlight-color: transparent; }
-button { font: 600 14px/1.25 "Segoe UI", sans-serif; min-height: 48px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: #30372d; cursor: pointer; transition: background .15s; }
-button:hover:enabled { background: #eeeae1; }
-button:disabled { color: #777a70; background: #ebe8e0; border-color: #ddd9cf; cursor: not-allowed; }
-button:focus-visible, summary:focus-visible, .voice-output>div:focus-visible { outline: 3px solid #9f482c; outline-offset: 4px; }
+button { font: 400 20px/1.2 'Instrument Sans', 'Segoe UI', sans-serif; min-height: 52px; padding: 12px 20px; border: 1px solid #eeeaf5; border-radius: 13px; color: #f5f3fc; background: transparent; cursor: pointer; }
+button:hover:enabled { background: #e6d6fa12; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--lavender); outline-offset: 5px; }
 [hidden] { display: none !important; }
-.masthead { min-height: 104px; display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; border-bottom: 1px solid #d7d3c8; }
-.brand { display: flex; align-items: center; gap: 13px; }
-.brand>svg { width: 42px; height: 42px; color: var(--accent); }
-h1 { font-size: 26px; font-weight: 650; letter-spacing: -1px; }
-.brand p { font-size: 12px; letter-spacing: .2px; color: var(--muted); margin-top: 4px; }
-.connection-group { display: flex; align-items: center; gap: 20px; }
-#connection { max-width: 300px; font-size: 13px; line-height: 1.5; color: #62675b; overflow-wrap: anywhere; }
-#connection::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #a46a25; margin-right: 8px; }
-body[data-connected="true"] #connection::before { background: var(--green); }
-.connect { display: flex; gap: 9px; align-items: center; background: #fffefa; border-color: #c8c6b7; }
-.connect svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; }
-.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 18px 24px; align-items: start; }
-.camera-panel { grid-column: 1; grid-row: 1; min-width: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 3px 12px #3a342008; }
-.panel-heading { min-height: 55px; padding: 16px 20px; display: flex; gap: 12px; justify-content: space-between; align-items: center; }
-h2 { font-size: 14px; font-weight: 650; letter-spacing: -.1px; }
-.panel-heading>span, .panel-heading>p { color: var(--muted); font-size: 12px; line-height: 1.4; text-align: right; }
-#tracking-status::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #898c7d; margin-right: 7px; }
-body[data-face="true"] #tracking-status { color: var(--green); }
-body[data-face="true"] #tracking-status::before { background: var(--green); }
-.camera { position: relative; display: grid; place-items: center; overflow: hidden; height: clamp(260px, 43vh, 430px); background: #e7e6dd; border-block: 1px solid #deded2; }
-body[data-connected="true"][data-face="true"] .camera { background: #252d28; border-color: #252d28; }
-video, canvas { position: absolute; width: 100%; height: 100%; object-fit: contain; }
+.sr-only, #state-detail { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.masthead { height: 100px; padding-top: 20px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid #78718a; }
+.brand { display: flex; align-items: center; gap: 25px; padding-left: 9px; }
+.brand>svg { width: 56px; height: 26px; fill: none; stroke: #dbbef5; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+h1 { font-size: 29px; font-weight: 650; letter-spacing: .2px; line-height: 36px; }
+.connection-group { display: flex; align-items: center; justify-content: flex-end; gap: 18px; min-width: 0; }
+#connection { max-width: 380px; font-size: 20px; letter-spacing: .4px; line-height: 1.4; overflow-wrap: anywhere; }
+#connection::before { content: ''; display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #d7b380; margin-right: 20px; }
+body[data-connected='true'] #connection::before { background: var(--mint); box-shadow: 0 0 14px #b6fab735; }
+#usb { font-size: 16px; min-height: 44px; padding: 10px 14px; }
+.workspace { display: grid; grid-template-columns: minmax(0, 960fr) minmax(0, 371fr); column-gap: clamp(28px, 4.855vw, 77px); row-gap: 44px; margin-top: 62px; align-items: start; }
+.camera-panel { min-width: 0; grid-column: 1; grid-row: 1; }
+.camera-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; height: 34px; margin-bottom: 23px; }
+.camera-heading h2 { font-size: 29px; line-height: 34px; font-weight: 600; color: var(--lavender); letter-spacing: -.4px; transform: translateY(2px); }
+#tracking-status { transform: translateY(3px); font-size: 20px; line-height: 28px; color: var(--muted); text-align: right; }
+#tracking-status::after { content: ''; display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-left: 12px; background: #797286; }
+body[data-face='true'] #tracking-status::after { background: #d9bcf5; }
+.camera { aspect-ratio: 30 / 17; position: relative; display: grid; place-items: center; overflow: hidden; border-radius: 15px; background: #191723; isolation: isolate; }
+video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 video { transform: scaleX(-1); }
-canvas { pointer-events: none; }
-.camera-note { z-index: 1; text-align: center; padding: 26px; max-width: 370px; }
-.camera-note>svg { display: block; margin: 0 auto 20px; width: 52px; height: 52px; fill: none; stroke: #78816e; stroke-width: 1.3; }
-.camera-note strong { font-size: 23px; font-weight: 500; letter-spacing: -.5px; }
-.camera-note p { font-size: 14px; color: #636b5c; line-height: 1.65; margin-top: 10px; }
-.camera-corners { display: none; }
-.camera-footer { display: flex; align-items: center; justify-content: space-between; min-height: 51px; padding: 13px 20px; gap: 14px; font-size: 12px; line-height: 1.5; color: #606757; }
-.mirror-note { color: #75796d; white-space: nowrap; }
-.control-panel { grid-column: 2; grid-row: 1 / 3; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.motion-panel { min-height: 184px; display: grid; grid-template-rows: auto 1fr auto; gap: 10px; padding: 20px; border: 1px solid #decaa6; border-left: 4px solid #a46b27; border-radius: 10px; background: #f8f0df; --tone: #885716; }
-.eyebrow { display: flex; align-items: center; gap: 8px; text-transform: uppercase; font-size: 10px; font-weight: 650; letter-spacing: 1.4px; color: var(--tone); }
-.status-dot { width: 6px; height: 6px; background: var(--tone); border-radius: 50%; }
-#state { color: var(--tone); font-size: 28px; line-height: 1.15; letter-spacing: -.9px; font-weight: 600; margin: 0; align-self: center; min-height: 0; overflow-wrap: anywhere; }
-#state-detail { font-size: 13px; line-height: 1.5; color: #675c46; min-height: 39px; margin: 0; }
-.motion-panel[data-tone="ready"] { --tone: #285e45; background: #eaf0e4; border-color: #c6d5bd; border-left-color: #447653; }
-.motion-panel[data-tone="ready"] #state-detail { color: #50634c; }
-.motion-panel[data-tone="danger"] { --tone: #ac3324; background: #fff0e9; border-color: #e6baaa; border-left-color: #bd4830; }
-.motion-panel[data-tone="danger"] #state-detail { color: #7b4e41; }
-.steering-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
-#enable:enabled { color: #fffaf4; background: var(--accent); border-color: var(--accent); }
-#enable:hover:enabled { background: #8d3620; }
-#enable[aria-pressed="true"] { background: #fffefa; color: #3d593c; border-color: #9ba88f; }
-#enable[aria-pressed="true"]:hover { background: #e9eee1; }
-#stop { background: #fff3ee; color: #a73523; border-color: #d8a08c; }
-#stop:hover:enabled { background: #ffe0d2; }
-#stop:disabled { background: #eeebe5; color: #86746d; border-color: #d8d0c6; }
-#stop>span { font-size: 10px; margin-right: 4px; }
-kbd { font: 10px/1.4 "Consolas", monospace; border: 1px solid #bcb8ab; color: #635c50; border-radius: 4px; padding: 2px 4px; margin-left: 6px; }
-.telemetry { grid-column: 1; grid-row: 2; min-width: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
-.telemetry .panel-heading { min-height: 43px; padding-block: 12px; }
-#telemetry-status { font-size: 11px; }
-dl { display: grid; grid-template-columns: 1fr 1fr .85fr; padding: 0 20px 18px; }
-dl>div { min-width: 0; padding-inline: 20px; border-left: 1px solid var(--line); }
-dl>div:first-child { border: 0; padding-left: 0; }
-.distance-metric { grid-column: 2; grid-row: 1; }
-.target-metric { grid-column: 3; grid-row: 1; }
-dt { font-size: 12px; color: var(--muted); line-height: 1.5; }
-dd { font-family: "Segoe UI", Arial, sans-serif; font-weight: 500; font-variant-numeric: tabular-nums; font-size: 39px; letter-spacing: -1.8px; line-height: 1.35; margin-top: 4px; min-height: 53px; }
-dd .unit { color: #696e61; font: 14px "Segoe UI", sans-serif; margin-left: 5px; letter-spacing: 0; }
-.target-metric dd { font-size: 22px; letter-spacing: -.6px; padding-top: 9px; }
-.sensor-note { border-top: 1px solid var(--line); padding: 10px 20px; color: #737565; font-size: 11px; line-height: 1.5; }
-.voice-panel { min-width: 0; border: 1px solid var(--line); background: var(--paper); border-radius: 12px; overflow: hidden; margin-top: 2px; }
-.voice-panel h2 { display: flex; align-items: center; gap: 8px; }
-.voice-panel h2 svg { width: 16px; height: 16px; fill: none; stroke: #636f58; stroke-width: 1.5; }
-.voice-panel .panel-heading { padding-inline: 18px; border-bottom: 1px solid var(--line); align-items: flex-start; }
-#voice-state { font-size: 11px; max-width: 145px; line-height: 1.5; min-height: 33px; }
-.voice-output>div { min-width: 0; height: 98px; overflow: auto; padding: 15px 18px; scrollbar-width: thin; scrollbar-color: #b7bdab transparent; }
-.voice-output>div:focus-visible { outline-offset: -3px; }
-.voice-output>div+div { border-top: 1px solid var(--line); background: #f3f5ed; }
-h3 { font-size: 10px; color: #707365; font-weight: 650; text-transform: uppercase; letter-spacing: 1.1px; margin-bottom: 10px; }
-.voice-output p { font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
-#voice-command { color: #285e45; font-weight: 600; }
-#voice-command[data-accepted="false"] { color: #62675b; font-weight: 400; }
-.command-output[data-feedback="idle"] { background: #f7f5ee; }
-.command-output[data-feedback="rejected"] { background: #fff3df; }
-.command-output[data-feedback="rejected"] h3 { color: #8a531c; }
-details { border-top: 1px solid var(--line); font-size: 12px; padding: 12px 18px; color: #646a5b; }
+#overlay { pointer-events: none; }
+.camera-note { z-index: 1; text-align: center; max-width: 420px; padding: 25px; }
+.camera-note svg { width: 48px; height: 48px; fill: none; stroke: #b9a6d1; stroke-width: 1.5; margin-bottom: 18px; }
+.camera-note strong { display: block; font-weight: 500; font-size: 24px; color: var(--lavender); }
+.camera-note p { font-size: 16px; color: var(--muted); margin-top: 12px; line-height: 1.6; }
+.alignment-tick { display: none; position: absolute; width: 2px; height: 20px; left: calc(50% - 1px); bottom: 0; background: var(--lavender); pointer-events: none; }
+body[data-face='true'] .alignment-tick { display: block; }
+.control-panel { grid-column: 2; grid-row: 1 / 3; min-width: 0; padding-top: 48px; padding-left: 1px; }
+.motion-panel { min-height: 122px; }
+.motion-panel h2, .voice-panel h2 { font-size: 21px; font-weight: 400; line-height: 26px; letter-spacing: .6px; color: var(--muted); }
+#state { font-size: clamp(34px, 2.775vw, 44px); line-height: 1.12; font-weight: 600; letter-spacing: .8px; color: var(--lavender); min-height: 82px; margin-top: 14px; overflow-wrap: anywhere; }
+#state[data-long='true'] { font-size: 32px; line-height: 1.2; letter-spacing: -.5px; }
+.motion-panel[data-tone='danger'] #state { color: #ffaaa4; }
+.steering-actions { display: flex; gap: 22px; align-items: center; width: calc(100% + 6px); }
+#stop { display: inline-flex; align-items: center; justify-content: center; gap: 18px; flex: 0 0 161px; height: 56px; font-size: 24px; font-weight: 500; padding: 10px 20px; background: #ef625e; border-color: #ef625e; color: #fff; }
+#stop:hover:enabled { background: #dc514e; border-color: #dc514e; }
+kbd { font: 500 16px/1.2 'Instrument Sans', sans-serif; background: #ffc0bd; color: #261824; border-radius: 5px; padding: 3px 8px; }
+#enable { flex: 1; white-space: nowrap; padding-inline: 18px; }
+.voice-panel { margin-top: 109px; min-width: 0; }
+.mic-status { display: flex; align-items: flex-start; gap: 24px; margin-top: 15px; min-height: 72px; color: var(--lavender); }
+.mic-status svg { flex: 0 0 36px; height: 36px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+#voice-state { font-size: 28px; line-height: 36px; font-weight: 600; max-height: 72px; overflow: auto; overflow-wrap: anywhere; }
+#voice-state[data-long='true'] { font-size: 19px; line-height: 24px; }
+.voice-output { margin-top: 5px; padding-left: 3px; display: grid; grid-template-rows: 89px auto; }
+.voice-output>div { min-width: 0; }
+h3 { font-size: 20px; line-height: 26px; font-weight: 400; letter-spacing: .3px; color: var(--muted); }
+.voice-output p { font-size: 23px; line-height: 29.5px; font-weight: 400; margin-top: 4px; max-height: 59px; overflow: auto; overflow-wrap: anywhere; scrollbar-width: thin; scrollbar-color: #827192 transparent; }
+#heard { font-family: 'IBM Plex Mono', Consolas, monospace; letter-spacing: .25px; padding-left: 1px; }
+#voice-command { display: inline-block; max-width: 100%; padding-right: 1px; font-family: "IBM Plex Mono", Consolas, monospace; font-size: 23px; letter-spacing: .2px; margin-top: 6px; }
+.command-output { padding-left: 2px; }
+.command-output h3 { letter-spacing: .9px; }
+#voice-command[data-accepted='true']::after { content: ''; display: inline-block; width: 18px; height: 10px; border-left: 3px solid var(--mint); border-bottom: 3px solid var(--mint); transform: rotate(-45deg); margin-left: 15px; vertical-align: 4px; }
+.command-output[data-feedback='rejected'] #voice-command { color: #ffd099; font-size: 19px; }
+.telemetry { grid-column: 1; grid-row: 2; min-width: 0; padding-inline: 8px; }
+dl { display: grid; grid-template-columns: 39.83% 35.8% 24.37%; }
+dl>div { min-width: 0; }
+dt { font: 400 20px/27px "IBM Plex Mono", Consolas, monospace; letter-spacing: .9px; color: #c5bdd7; white-space: nowrap; }
+dd { font: 400 36px/47px 'IBM Plex Mono', Consolas, monospace; letter-spacing: 1.3px; font-variant-numeric: tabular-nums; margin-top: 7px; padding-left: 3px; overflow-wrap: anywhere; }
+dd .unit { font: inherit; letter-spacing: inherit; }
+.secondary { margin-top: 124px; padding-bottom: 40px; display: flex; flex-wrap: wrap; gap: 28px; align-items: start; font-size: 15px; line-height: 1.6; color: var(--muted); }
+.secondary details { max-width: 600px; min-width: 0; }
 summary { cursor: pointer; width: fit-content; }
-details p { margin-top: 10px; line-height: 1.7; }
-footer { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 19px 0 22px; color: #75776a; font-size: 11px; }
-.footer-divider { margin: 0 9px; color: #b4b2a6; }
-@media (min-width: 901px) and (max-width: 1100px) {
-  main { padding-inline: 24px; }
-  .workspace { grid-template-columns: minmax(0, 1fr) 315px; gap: 18px; }
-  .connection-group { gap: 12px; }
-  dd { font-size: 30px; letter-spacing: -1px; }
-  dl>div { padding-inline: 10px; }
-  .target-metric dd { font-size: 17px; }
-  .mirror-note { display: none; }
+.help-content { padding-top: 16px; }
+.help-content p+p { margin-top: 12px; }
+#mascot { width: 320px; max-width: 100%; margin-top: 20px; }
+@media (min-width: 901px) and (max-width: 1300px) {
+  .workspace { grid-template-columns: minmax(0, 1fr) minmax(290px, .4fr); column-gap: 32px; }
+  #state { font-size: 36px; }
+  #state[data-long='true'] { font-size: 28px; }
+  .steering-actions { gap: 12px; width: 100%; flex-wrap: wrap; }
+  #stop { flex-basis: 130px; gap: 10px; padding-inline: 12px; }
+  #enable { font-size: 18px; padding-inline: 12px; }
+  .voice-panel { margin-top: 75px; }
+  dt { font-size: 17px; letter-spacing: .4px; }
+  dd { font-size: 29px; }
+  .camera-heading h2 { font-size: 25px; }
+  #tracking-status { font-size: 17px; }
+}
+@media (max-width: 1100px) and (min-width: 901px) {
+  .workspace { grid-template-columns: minmax(0, 1fr) 275px; column-gap: 26px; }
+  .steering-actions { align-items: stretch; flex-direction: column; }
+  #stop { flex-basis: auto; width: 100%; }
+  #state { font-size: 34px; }
+  #connection { font-size: 17px; }
+  dt { font-size: 14px; letter-spacing: 0; }
+  dd { font-size: 23px; }
+  .voice-panel { margin-top: 48px; }
 }
 @media (max-width: 900px) {
-  main { padding-inline: 16px; }
-  .masthead { padding: 23px 0 18px; min-height: 0; flex-direction: column; align-items: stretch; gap: 22px; margin-bottom: 18px; }
-  h1 { font-size: 24px; }
-  .brand>svg { width: 38px; height: 38px; }
-  .connection-group { justify-content: space-between; gap: 12px; min-height: 48px; }
-  #connection { font-size: 12px; max-width: 45%; }
-  .connect { font-size: 12px; padding: 11px 12px; gap: 6px; }
-  .connect svg { width: 16px; height: 16px; }
-  .workspace { display: flex; flex-direction: column; gap: 16px; }
+  body { background: radial-gradient(ellipse 120% 75% at -20% 100%, #45316d 0%, transparent 80%), #100f1c; background-attachment: scroll; }
+  main { width: calc(100% - 40px); }
+  .masthead { height: auto; min-height: 100px; padding: 24px 0 20px; flex-wrap: wrap; gap: 20px; }
+  .brand { padding-left: 0; gap: 15px; }
+  .brand>svg { width: 44px; }
+  h1 { font-size: 27px; }
+  #connection { font-size: 14px; }
+  #connection::before { width: 9px; height: 9px; margin-right: 10px; }
+  .connection-group { display: grid; grid-template-columns: minmax(0, 1fr) auto; justify-content: space-between; gap: 12px; min-height: 44px; width: 100%; }
+  .workspace { display: flex; flex-direction: column; gap: 24px; margin-top: 28px; }
   .control-panel { display: contents; }
-  .motion-panel { order: 0; width: 100%; min-height: 180px; padding: 16px; }
-  #state { font-size: 27px; min-height: 0; margin: 0; }
-  #state-detail { min-height: 39px; }
-  .steering-actions { order: 1; width: 100%; position: sticky; top: 8px; z-index: 5; background: #f4f1ea; box-shadow: 0 0 0 6px #f4f1ea; border-radius: 9px; }
+  .motion-panel { order: 0; width: 100%; min-height: 105px; }
+  #state { font-size: 36px; min-height: 65px; margin-top: 8px; }
+  #state[data-long='true'] { font-size: 29px; }
+  .steering-actions { order: 1; width: 100%; gap: 12px; position: sticky; top: 10px; z-index: 5; background: #12101ef2; box-shadow: 0 0 0 7px #12101ef2; border-radius: 13px; }
+  #stop { flex-basis: 140px; }
+  #enable { padding-inline: 12px; font-size: 18px; }
   .camera-panel { order: 2; width: 100%; }
-  .panel-heading { padding: 15px 16px; min-height: 51px; }
-  .camera { height: auto; aspect-ratio: 16/10; }
-  .camera-note { padding: 22px; }
-  .camera-note>svg { width: 40px; height: 40px; margin-bottom: 17px; }
-  .camera-note strong { font-size: 21px; }
-  .camera-note p { font-size: 13px; }
-  .camera-footer { padding-inline: 16px; }
-  .mirror-note { display: none; }
-  .telemetry { order: 3; width: 100%; }
-  .telemetry dl { grid-template-columns: 1fr 1fr; padding: 0 16px 16px; }
-  .distance-metric { grid-column: 2; grid-row: 1; }
-  .target-metric { grid-column: 1/-1; grid-row: 2; display: flex; align-items: center; justify-content: space-between; padding: 12px 0 0; margin-top: 10px; border: 0; border-top: 1px solid var(--line); }
-  dd { font-size: 34px; min-height: 46px; }
-  .target-metric dd { font-size: 16px; min-height: 0; margin: 0; padding: 0; }
-  dl>div { padding-inline: 16px; }
-  .sensor-note { padding-inline: 16px; }
-  .voice-panel { order: 4; width: 100%; margin: 0; }
-  .voice-panel .panel-heading { min-height: 60px; }
-  footer { font-size: 10px; gap: 10px; }
-  footer>span:last-child { white-space: nowrap; }
+  .camera-heading { height: 30px; margin-bottom: 16px; gap: 8px; }
+  .camera-heading h2 { font-size: 24px; line-height: 30px; }
+  #tracking-status { font-size: 16px; line-height: 22px; }
+  #tracking-status::after { width: 8px; height: 8px; margin-left: 8px; }
+  .telemetry { order: 3; width: 100%; padding-inline: 2px; }
+  dl { grid-template-columns: 1fr 1fr; gap: 20px 16px; }
+  dt { font-size: 16px; line-height: 23px; letter-spacing: .3px; }
+  dd { font-size: 27px; line-height: 37px; margin-top: 5px; letter-spacing: -.6px; }
+  dl>div:last-child { grid-column: 1/-1; }
+  .voice-panel { order: 4; width: 100%; margin: 12px 0 0; }
+  .voice-output { margin-top: 8px; grid-template-rows: 100px auto; }
+  .voice-output p { max-height: 64px; font-size: 21px; }
+  .secondary { margin-top: 68px; gap: 18px; flex-direction: column; }
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (max-width: 480px) {
+  main { width: calc(100% - 32px); }
+  .connection-group { width: 100%; }
+  .camera-heading h2 { font-size: 21px; }
+  #tracking-status { font-size: 14px; }
+  .camera-note { padding: 16px; }
+  .camera-note svg { width: 32px; height: 32px; margin-bottom: 9px; }
+  .camera-note strong { font-size: 19px; }
+  .camera-note p { font-size: 13px; margin-top: 8px; }
+  #usb { font-size: 14px; }
+}
+@media (max-width: 359px) {
+  .brand { gap: 12px; }
+  h1 { font-size: 25px; }
+  #stop { flex-basis: 115px; padding-inline: 12px; gap: 9px; }
+  #enable { font-size: 16px; }
+  .camera-heading h2 { font-size: 18px; }
+  #tracking-status { font-size: 12px; }
+  dt { font-size: 14px; }
+  dd { font-size: 23px; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 
-/* Preserve Hoot as a compact companion beside camera guidance. */
-#mascot { flex: 0 0 170px; }
-#mascot .lk-card { display: grid; grid-template-columns: 64px 1fr; height: 68px; padding: 0; margin: 0; border: 0; background: transparent; color: #414b37; border-radius: 0; }
-#mascot .lk-stage { grid-column: 1; width: 64px; height: 68px; margin: 0; }
-#mascot .lk-bar { grid-column: 2; display: grid; grid-template-columns: 1fr 32px; grid-template-rows: 1fr 1fr; gap: 0 4px; margin: 0; }
-#mascot .lk-name { grid-column: 1; grid-row: 1; align-self: end; background: transparent; padding: 0; font-size: 12px; color: #4e5c43; }
-#mascot .lk-mood { grid-column: 1; grid-row: 2; align-self: start; font-size: 10px; font-weight: 400; color: #626b58; }
-#mascot .lk-read, #mascot .lk-grow { display: none; }
-#mascot .lk-say { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); min-height: 0; }
-#mascot .lk-snd { grid-column: 2; grid-row: 1/3; align-self: center; min-height: 34px !important; padding: 2px !important; background: #f2eee5 !important; border-color: #cfc9b8 !important; color: #4c5841 !important; font-size: 10px !important; border-radius: 6px !important; }
-@media(max-width:1100px) { #mascot { flex-basis: 134px; } #mascot .lk-card { grid-template-columns: 54px 1fr; } #mascot .lk-stage { width: 54px; } }
-@media(prefers-reduced-motion:reduce) { #mascot * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
 <main>
   <header class="masthead">
-    <div class="brand"><svg viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="12" fill="currentColor"/><path d="M10 27V13h6v9h14v5z" fill="#fffaf2"/><circle cx="26" cy="14" r="4" fill="#fffaf2"/></svg><div><h1>Lookout Rover</h1><p>Head &amp; voice control</p></div></div>
-    <div class="connection-group"><p id="connection" role="status">Red Board disconnected</p><button id="usb" class="connect"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 2v4m6-4v4M5 6h10v3a5 5 0 0 1-10 0zm5 8v4"/></svg>Connect Red Board</button></div>
+    <div class="brand"><svg viewBox="0 0 64 28" aria-hidden="true"><path d="M3 5c0 18 18 23 26 10C19 13 10 7 3 5Zm58 0c0 18-18 23-26 10C45 13 54 7 61 5Z"/><path d="m12 8 2 8m38-8-2 8"/></svg><h1>Lookout Rover</h1></div>
+    <div class="connection-group"><p id="connection" role="status">Red Board disconnected</p><button id="usb">Connect Red Board</button></div>
   </header>
   <div class="workspace">
     <section class="camera-panel" aria-labelledby="camera-title">
-      <div class="panel-heading"><h2 id="camera-title">Operator camera</h2><span id="tracking-status">Camera off</span></div>
+      <div class="camera-heading"><h2 id="camera-title">Operator camera</h2><span id="tracking-status">Camera off</span></div>
       <div class="camera">
-        <div id="camera-note" class="camera-note"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="12" width="26" height="24" rx="5"/><path d="m32 20 10-6v20l-10-6"/></svg><strong>Camera is off</strong><p id="camera-instruction">Connect the Red Board, then enable steering.</p></div>
+        <div id="camera-note" class="camera-note"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="12" width="26" height="24" rx="5"/><path d="m32 20 10-6v20l-10-6"/></svg><strong id="camera-empty-title">Camera off</strong><p id="camera-instruction">Connect the Red Board, then enable steering.</p></div>
         <video id="video" autoplay muted playsinline></video>
-        <canvas id="overlay"></canvas>
-        <div class="camera-corners" aria-hidden="true"></div>
+        <canvas id="overlay" aria-hidden="true"></canvas>
+        <span class="alignment-tick" aria-hidden="true"></span>
       </div>
-      <div class="camera-footer"><span id="camera-guidance">Look straight to center. Turn your head to steer.</span><div id="mascot" aria-label="Hoot rover companion"></div></div>
     </section>
-    <aside class="control-panel" aria-label="Rover controls and telemetry">
-      <section class="motion-panel" data-tone="offline" id="motion-panel">
-        <div class="eyebrow"><span class="status-dot"></span> Rover status</div>
-        <p id="state" role="status">USB disconnected</p>
+    <aside class="control-panel" aria-label="Rover controls">
+      <section class="motion-panel" data-tone="offline" id="motion-panel" aria-labelledby="motion-label">
+        <h2 id="motion-label">Rover status</h2>
+        <p id="state" role="status" aria-describedby="state-detail">USB disconnected</p>
         <p id="state-detail">Connect the Red Board to begin.</p>
       </section>
-      <div class="steering-actions"><button id="enable" aria-pressed="false" disabled>Enable steering</button><button id="stop" aria-keyshortcuts="Escape" disabled><span aria-hidden="true">■</span> Stop <kbd>Esc</kbd></button></div>
-
-    <section class="voice-panel" aria-labelledby="voice-title">
-      <div class="panel-heading"><h2 id="voice-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6"/></svg>Voice control</h2><p id="voice-state" role="status">Mic off</p></div>
-      <div class="voice-output"><div class="transcript" tabindex="0" role="region" aria-label="Microphone transcript"><h3>Mic heard</h3><p id="heard">Heard: —</p></div><div class="command-output" data-feedback="idle" tabindex="0" role="region" aria-label="Rover command feedback"><h3>Rover accepted</h3><p id="voice-command" role="status" data-accepted="false">No command yet</p></div></div>
-      <details><summary>Voice commands</summary><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” to stop, “resume” to drive again, or “recenter” to calibrate.</p></details>
-    </section>
-    </aside>
-      <section class="telemetry" aria-labelledby="telemetry-title">
-        <div class="panel-heading"><h2 id="telemetry-title">Rover telemetry</h2><span id="telemetry-status">No data</span></div>
-        <dl>
-          <div class="primary-metric"><dt>Rover heading</dt><dd id="heading">—</dd></div>
-          <div class="target-metric"><dt>Steering target</dt><dd id="target">—</dd></div>
-          <div class="primary-metric distance-metric"><dt>Front distance</dt><dd id="distance">—</dd></div>
-        </dl>
-        <p class="sensor-note">Forward motion pauses below 20 cm.</p>
+      <div class="steering-actions"><button id="stop" aria-keyshortcuts="Escape" disabled>Stop <kbd>Esc</kbd></button><button id="enable" aria-pressed="false" disabled>Enable steering</button></div>
+      <section class="voice-panel" aria-labelledby="voice-title">
+        <h2 id="voice-title">Voice control</h2>
+        <div class="mic-status"><svg viewBox="0 0 32 40" aria-hidden="true"><rect x="11" y="3" width="10" height="23" rx="5"/><path d="M5 18v4a11 11 0 0 0 22 0v-4M16 33v5m-5 0h10"/></svg><p id="voice-state" role="status" tabindex="0">Mic off</p></div>
+        <div class="voice-output">
+          <div class="transcript"><h3>Mic heard</h3><p id="heard" tabindex="0" role="region" aria-label="Microphone transcript">—</p></div>
+          <div class="command-output" data-feedback="idle"><h3>Rover accepted</h3><p id="voice-command" role="status" data-accepted="false" tabindex="0">No command yet</p></div>
+        </div>
       </section>
+    </aside>
+    <section class="telemetry" aria-label="Rover telemetry">
+      <dl>
+        <div><dt>Rover heading</dt><dd id="heading">—</dd></div>
+        <div><dt>Front distance</dt><dd id="distance">—</dd></div>
+        <div><dt>Steering target</dt><dd id="target">—</dd></div>
+      </dl>
+      <span id="telemetry-status" class="sr-only">No data</span>
+    </section>
   </div>
-  <footer><span>Lookout Rover <span class="footer-divider">/</span> Operator console</span><span>Stop anytime <kbd>Esc</kbd></span></footer>
+  <section class="secondary" aria-label="Operator help and Hoot">
+    <details><summary>Steering &amp; voice help</summary><div class="help-content"><p id="camera-guidance">Look straight to center. Turn your head to steer.</p><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop, “resume” to drive again, or “recenter” to calibrate.</p><p>Forward motion pauses below 20 cm or when the front sensor has no echo. Motion pauses when tracking or rover data is lost.</p><p>The camera view is mirrored. Use desktop Chrome or Edge over HTTPS for USB.</p></div></details>
+    <details class="companion"><summary>Hoot companion &amp; audio</summary><div id="mascot" aria-label="Hoot rover companion"></div></details>
+  </section>
 </main>
 <script>
   class RedBoardConnection {
@@ -466,7 +462,7 @@ footer { display: flex; justify-content: space-between; align-items: center; gap
     if (match) {
       const unit = document.createElement("span");
       unit.className = "unit";
-      unit.textContent = match[2].trim();
+      unit.textContent = match[2].startsWith(" cm") ? match[2] : match[2].trim();
       element.append(unit);
     }
   }
@@ -476,15 +472,17 @@ footer { display: flex; justify-content: space-between; align-items: center; gap
     enableButton.textContent = enabled ? "Disable steering" : "Enable steering";
     enableButton.setAttribute("aria-pressed", String(enabled));
     enableButton.disabled = !enabled && !socket.ready;
-    const micStatus = voiceLabel + (voicePackInstalling ? " · downloading English voice pack" : "");
+    const micStatus = (/^Listening/.test(voiceLabel) ? "Listening" : voiceLabel) + (voicePackInstalling ? " · downloading English voice pack" : "");
     if (byId("voice-state").textContent !== micStatus) byId("voice-state").textContent = micStatus;
+    byId("voice-state").dataset.long = String(micStatus.length > 20);
+    byId("voice-state").title = voiceLabel;
 
     const now = performance.now();
     const report = latestStatus && now - latestStatus.at < 650 ? latestStatus : null;
     const hasFace = liveFace(now);
     byId("target").textContent = enabled && neutral !== null && hasFace ? degrees(target()) : "—";
     renderMetric("heading", report ? degrees(report.heading) : "—");
-    renderMetric("distance", report ? (report.distance === null ? "No echo" : report.distance.toFixed(1) + " cm") : "—");
+    renderMetric("distance", report ? (report.distance === null ? "No echo" : Number(report.distance.toFixed(1)) + " cm") : "—");
 
     let reason;
     if (!socket.ready) reason = "USB disconnected";
@@ -510,6 +508,7 @@ footer { display: flex; justify-content: space-between; align-items: center; gap
     else reason = "Turning";
     if (!socket.ready && usbButton.disabled && byId("connection").textContent === "Connecting…") reason = "Connecting";
     if (byId("state").textContent !== reason) byId("state").textContent = reason;
+    byId("state").dataset.long = String(reason.length > 15);
     const safe = ["Aligned", "Turning", "Driving forward", "Reversing"].includes(reason);
     const danger = ["Obstacle ahead", "Stopped", "Wheels not moving", "Motor power off"].includes(reason);
     byId("motion-panel").dataset.tone = danger ? "danger" : safe ? "ready" : "offline";
@@ -539,9 +538,10 @@ footer { display: flex; justify-content: space-between; align-items: center; gap
     document.body.dataset.connected = String(socket.ready);
     document.body.dataset.face = String(Boolean(enabled && hasFace));
     byId("stop").disabled = !socket.ready;
-    byId("tracking-status").textContent = !enabled ? "Camera off" : !hasFace ? "Finding face" : neutral === null ? "Centering" : "Face tracked";
+    byId("tracking-status").textContent = !enabled ? "Camera off" : trackingError ? "Tracking paused" : !stream ? "Starting camera" : !tracker ? "Loading tracker" : !hasFace ? "Face lost" : neutral === null ? "Centering" : "Tracking";
     byId("telemetry-status").textContent = report ? "Live" : socket.ready ? "Waiting for data" : "No data";
-    byId("camera-instruction").textContent = socket.ready ? "Enable steering to start your camera and mic." : "Connect the Red Board, then enable steering.";
+    byId("camera-empty-title").textContent = trackingError ? "Camera unavailable" : enabled ? "Starting camera" : "Camera off";
+    byId("camera-instruction").textContent = trackingError || (enabled ? "Allow camera access. Keep your face in view." : socket.ready ? "Enable steering to start your camera and mic." : "Connect the Red Board, then enable steering.");
     byId("camera-guidance").textContent = enabled && neutral === null ? "Look straight at the camera. Hold still to center." : "Look straight to center. Turn your head to steer.";
   }
 
@@ -707,10 +707,21 @@ footer { display: flex; justify-content: space-between; align-items: center; gap
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!box) return;
     const [x0, y0, x1, y1] = box;
-    ctx.strokeStyle = "#a5ecc5";
-    ctx.lineWidth = 2;
-    ctx.strokeRect((1 - x1) * canvas.width, y0 * canvas.height,
-                   (x1 - x0) * canvas.width, (y1 - y0) * canvas.height);
+    // Video and overlay both use contain, with one mirrored x projection.
+    const scale = Math.min(canvas.clientWidth / canvas.width, canvas.clientHeight / canvas.height) || 1;
+    const arm = 20 / scale;
+    const left = (1 - x1) * canvas.width, right = (1 - x0) * canvas.width;
+    const top = y0 * canvas.height, bottom = y1 * canvas.height;
+    ctx.strokeStyle = "#e6d6fa";
+    ctx.lineWidth = 2 / scale;
+    ctx.beginPath();
+    for (const [x, y, dx, dy] of [[left, top, 1, 1], [right, top, -1, 1],
+                                  [left, bottom, 1, -1], [right, bottom, -1, -1]]) {
+      ctx.moveTo(x + dx * arm, y);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x, y + dy * arm);
+    }
+    ctx.stroke();
   }
 
   function acceptPose(pose, at) {
@@ -806,7 +817,9 @@ footer { display: flex; justify-content: space-between; align-items: center; gap
     const accepted = text.startsWith("Command: ");
     byId("voice-command").dataset.accepted = String(accepted);
     byId("voice-command").closest(".command-output").dataset.feedback = accepted ? "accepted" : text ? "rejected" : "idle";
-    byId("voice-command").textContent = accepted ? text.replace("Command: ", "") : text || "No command yet";
+    const action = accepted ? text.slice("Command: ".length).split(" · ")[0] : "";
+    byId("voice-command").textContent = accepted ? action.charAt(0).toUpperCase() + action.slice(1) : text || "No command yet";
+    byId("voice-command").title = text;
     byId("voice-command").closest(".command-output").querySelector("h3").textContent = accepted ? "Rover accepted" : text ? "Command not accepted" : "Rover accepted";
   }
 
@@ -895,7 +908,7 @@ footer { display: flex; justify-content: space-between; align-items: center; gap
       } else {
         lastInterimVoiceIndex = i;
       }
-      if (transcript) byId("heard").textContent = "Heard: " + transcript;
+      if (transcript) byId("heard").textContent = transcript;
       const normalized = transcript.toLowerCase().replace(/[’']/g, "").replace(/[^a-z]+/g, " ").trim();
       const addressed = roverPrefix.test(normalized);
       const spokenCommand = normalized.replace(roverPrefix, "");
@@ -1064,7 +1077,7 @@ footer { display: flex; justify-content: space-between; align-items: center; gap
     face = null;
     previousFrame = -1;
     voiceLabel = "Mic off";
-    byId("heard").textContent = "Heard: —";
+    byId("heard").textContent = "—";
     voiceFeedback("");
     byId("camera-note").hidden = false;
     draw(null);
