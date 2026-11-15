@@ -82,12 +82,12 @@ dl>div { min-width: 0; }
 dt { font: 400 20px/27px "IBM Plex Mono", Consolas, monospace; letter-spacing: .9px; color: #c5bdd7; white-space: nowrap; }
 dd { font: 400 36px/47px 'IBM Plex Mono', Consolas, monospace; letter-spacing: 1.3px; font-variant-numeric: tabular-nums; margin-top: 7px; padding-left: 3px; overflow-wrap: anywhere; }
 dd .unit { font: inherit; letter-spacing: inherit; }
-.secondary { margin-top: 124px; padding-bottom: 40px; display: flex; flex-wrap: wrap; gap: 28px; align-items: start; font-size: 15px; line-height: 1.6; color: var(--muted); }
+.secondary { margin-top: 124px; padding-bottom: 24px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 28px; align-items: end; font-size: 15px; line-height: 1.6; color: var(--muted); }
 .secondary details { max-width: 600px; min-width: 0; }
 summary { cursor: pointer; width: fit-content; }
 .help-content { padding-top: 16px; }
 .help-content p+p { margin-top: 12px; }
-#mascot { width: 320px; max-width: 100%; margin-top: 20px; }
+#mascot { width: 320px; max-width: 100%; margin-left: auto; }
 @media (min-width: 901px) and (max-width: 1300px) {
   .workspace { grid-template-columns: minmax(0, 1fr) minmax(290px, .4fr); column-gap: 32px; }
   #state { font-size: 36px; }
@@ -142,7 +142,7 @@ summary { cursor: pointer; width: fit-content; }
   .voice-panel { order: 4; width: 100%; margin: 12px 0 0; }
   .voice-output { margin-top: 8px; grid-template-rows: 100px auto; }
   .voice-output p { max-height: 64px; font-size: 21px; }
-  .secondary { margin-top: 68px; gap: 18px; flex-direction: column; }
+  .secondary { margin-top: 68px; gap: 24px; flex-direction: column; align-items: stretch; }
 }
 @media (max-width: 480px) {
   main { width: calc(100% - 32px); }
@@ -212,7 +212,7 @@ summary { cursor: pointer; width: fit-content; }
   </div>
   <section class="secondary" aria-label="Operator help and Hoot">
     <details><summary>Steering &amp; voice help</summary><div class="help-content"><p id="camera-guidance">Look straight to center. Turn your head to steer.</p><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop, “resume” to drive again, or “recenter” to calibrate.</p><p>Forward motion pauses below 20 cm or when the front sensor has no echo. Motion pauses when tracking or rover data is lost.</p><p>The camera view is mirrored. Use desktop Chrome or Edge over HTTPS for USB.</p></div></details>
-    <details class="companion"><summary>Hoot companion &amp; audio</summary><div id="mascot" aria-label="Hoot rover companion"></div></details>
+    <div id="mascot" aria-label="Hoot rover companion"></div>
   </section>
 </main>
 <script>
