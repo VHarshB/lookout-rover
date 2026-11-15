@@ -3,78 +3,221 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lookout Rover</title>
+<meta name="theme-color" content="#f4f1ea">
+<meta name="description" content="Lookout Rover operator console. Head steering, voice control, and live rover telemetry.">
+<title>Lookout Rover · Operator console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ad492d'/%3E%3Cpath d='M8 9v15h16v-5H13V9z' fill='%23fffaf2'/%3E%3C/svg%3E">
 <style>
-  :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif;
-    background: #101815; color: #f1f6f3; }
-  body { margin: 0; }
-  main { width: min(67rem, calc(100% - 2rem)); margin: 2.2rem auto; }
-  header { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem 1rem;
-    justify-content: space-between; border-bottom: 1px solid #2c4137; padding-bottom: 1rem; }
-  h1, h2, p { margin: 0; }
-  h1 { font-size: clamp(1.55rem, 4vw, 2.35rem); letter-spacing: -.045em; }
-  h2 { font-size: 1rem; }
-  p, label, dd { color: #c3d2cb; }
-  #connection { font-weight: 650; color: #abe6c2; }
-  .layout { display: grid; grid-template-columns: 1.45fr 1fr; gap: 1rem; margin-top: 1rem; }
-  section { padding: 1rem; border: 1px solid #345045; border-radius: .85rem;
-    background: #182520; min-width: 0; }
-  .camera { position: relative; aspect-ratio: 16 / 10; border-radius: .6rem; overflow: hidden;
-    display: grid; place-items: center; background: #0c1511; margin-top: .7rem; }
-  video, canvas { position: absolute; width: 100%; height: 100%; object-fit: contain; }
-  video { transform: scaleX(-1); }
-  canvas { pointer-events: none; }
-  .camera-note { padding: 1rem; text-align: center; }
-  .actions { margin-top: .75rem; display: flex; flex-wrap: wrap; gap: .45rem; }
-  .help { margin-top: .65rem; font-size: .87rem; line-height: 1.45; }
-  button { touch-action: none; user-select: none; min-height: 2.55rem; padding: .5rem .75rem;
-    border: 1px solid #507160; color: #f1f6f3; border-radius: .45rem;
-    background: #284235; font: 600 .88rem Inter, system-ui, sans-serif; }
-  button:disabled { opacity: .45; }
-  button:focus-visible { outline: 2px solid #abe6c2; outline-offset: 2px; }
-  button.active, button[aria-pressed="true"] { background: #35684e; }
-  #stop { background: #813a34; border-color: #af5c54; grid-area: stop; }
-  #state { margin-top: .5rem; min-height: 2.4em; }
-  dl { display: grid; grid-template-columns: 1fr auto; gap: .45rem; margin: .8rem 0; }
-  dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
-  #usb[hidden] { display: none; }
-  #state { color: #f1f6f3; font-size: 1.08rem; font-weight: 650; min-height: 1.5em; }
-  #voice-state { font-size: .85rem; }
-  #heard { overflow-wrap: anywhere; }
-  @media (max-width: 700px) { main { margin-top: 1rem; } .layout { grid-template-columns: 1fr; } }
+/* Lookout Rover — warm instrument console. No external assets or fonts. */
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", Arial, sans-serif;
+  color: #292d28;
+  background: #f4f1ea;
+  --paper: #fffefa;
+  --line: #ddd9ce;
+  --muted: #686c61;
+  --accent: #ac462b;
+  --green: #28634b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(1320px, 100%); padding: 0 36px; margin: auto; }
+h1, h2, h3, p, dl, dd { margin: 0; }
+button, summary { -webkit-tap-highlight-color: transparent; }
+button { font: 600 14px/1.25 "Segoe UI", sans-serif; min-height: 48px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: #30372d; cursor: pointer; transition: background .15s; }
+button:hover:enabled { background: #eeeae1; }
+button:disabled { color: #777a70; background: #ebe8e0; border-color: #ddd9cf; cursor: not-allowed; }
+button:focus-visible, summary:focus-visible, .voice-output>div:focus-visible { outline: 3px solid #9f482c; outline-offset: 4px; }
+[hidden] { display: none !important; }
+.masthead { min-height: 104px; display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; border-bottom: 1px solid #d7d3c8; }
+.brand { display: flex; align-items: center; gap: 13px; }
+.brand>svg { width: 42px; height: 42px; color: var(--accent); }
+h1 { font-size: 26px; font-weight: 650; letter-spacing: -1px; }
+.brand p { font-size: 12px; letter-spacing: .2px; color: var(--muted); margin-top: 4px; }
+.connection-group { display: flex; align-items: center; gap: 20px; }
+#connection { max-width: 300px; font-size: 13px; line-height: 1.5; color: #62675b; overflow-wrap: anywhere; }
+#connection::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #a46a25; margin-right: 8px; }
+body[data-connected="true"] #connection::before { background: var(--green); }
+.connect { display: flex; gap: 9px; align-items: center; background: #fffefa; border-color: #c8c6b7; }
+.connect svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 18px 24px; align-items: start; }
+.camera-panel { grid-column: 1; grid-row: 1; min-width: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 3px 12px #3a342008; }
+.panel-heading { min-height: 55px; padding: 16px 20px; display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+h2 { font-size: 14px; font-weight: 650; letter-spacing: -.1px; }
+.panel-heading>span, .panel-heading>p { color: var(--muted); font-size: 12px; line-height: 1.4; text-align: right; }
+#tracking-status::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #898c7d; margin-right: 7px; }
+body[data-face="true"] #tracking-status { color: var(--green); }
+body[data-face="true"] #tracking-status::before { background: var(--green); }
+.camera { position: relative; display: grid; place-items: center; overflow: hidden; height: clamp(260px, 43vh, 430px); background: #e7e6dd; border-block: 1px solid #deded2; }
+body[data-connected="true"][data-face="true"] .camera { background: #252d28; border-color: #252d28; }
+video, canvas { position: absolute; width: 100%; height: 100%; object-fit: contain; }
+video { transform: scaleX(-1); }
+canvas { pointer-events: none; }
+.camera-note { z-index: 1; text-align: center; padding: 26px; max-width: 370px; }
+.camera-note>svg { display: block; margin: 0 auto 20px; width: 52px; height: 52px; fill: none; stroke: #78816e; stroke-width: 1.3; }
+.camera-note strong { font-size: 23px; font-weight: 500; letter-spacing: -.5px; }
+.camera-note p { font-size: 14px; color: #636b5c; line-height: 1.65; margin-top: 10px; }
+.camera-corners { display: none; }
+.camera-footer { display: flex; align-items: center; justify-content: space-between; min-height: 51px; padding: 13px 20px; gap: 14px; font-size: 12px; line-height: 1.5; color: #606757; }
+.mirror-note { color: #75796d; white-space: nowrap; }
+.control-panel { grid-column: 2; grid-row: 1 / 3; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.motion-panel { min-height: 184px; display: grid; grid-template-rows: auto 1fr auto; gap: 10px; padding: 20px; border: 1px solid #decaa6; border-left: 4px solid #a46b27; border-radius: 10px; background: #f8f0df; --tone: #885716; }
+.eyebrow { display: flex; align-items: center; gap: 8px; text-transform: uppercase; font-size: 10px; font-weight: 650; letter-spacing: 1.4px; color: var(--tone); }
+.status-dot { width: 6px; height: 6px; background: var(--tone); border-radius: 50%; }
+#state { color: var(--tone); font-size: 28px; line-height: 1.15; letter-spacing: -.9px; font-weight: 600; margin: 0; align-self: center; min-height: 0; overflow-wrap: anywhere; }
+#state-detail { font-size: 13px; line-height: 1.5; color: #675c46; min-height: 39px; margin: 0; }
+.motion-panel[data-tone="ready"] { --tone: #285e45; background: #eaf0e4; border-color: #c6d5bd; border-left-color: #447653; }
+.motion-panel[data-tone="ready"] #state-detail { color: #50634c; }
+.motion-panel[data-tone="danger"] { --tone: #ac3324; background: #fff0e9; border-color: #e6baaa; border-left-color: #bd4830; }
+.motion-panel[data-tone="danger"] #state-detail { color: #7b4e41; }
+.steering-actions { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+#enable:enabled { color: #fffaf4; background: var(--accent); border-color: var(--accent); }
+#enable:hover:enabled { background: #8d3620; }
+#enable[aria-pressed="true"] { background: #fffefa; color: #3d593c; border-color: #9ba88f; }
+#enable[aria-pressed="true"]:hover { background: #e9eee1; }
+#stop { background: #fff3ee; color: #a73523; border-color: #d8a08c; }
+#stop:hover:enabled { background: #ffe0d2; }
+#stop:disabled { background: #eeebe5; color: #86746d; border-color: #d8d0c6; }
+#stop>span { font-size: 10px; margin-right: 4px; }
+kbd { font: 10px/1.4 "Consolas", monospace; border: 1px solid #bcb8ab; color: #635c50; border-radius: 4px; padding: 2px 4px; margin-left: 6px; }
+.telemetry { grid-column: 1; grid-row: 2; min-width: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+.telemetry .panel-heading { min-height: 43px; padding-block: 12px; }
+#telemetry-status { font-size: 11px; }
+dl { display: grid; grid-template-columns: 1fr 1fr .85fr; padding: 0 20px 18px; }
+dl>div { min-width: 0; padding-inline: 20px; border-left: 1px solid var(--line); }
+dl>div:first-child { border: 0; padding-left: 0; }
+.distance-metric { grid-column: 2; grid-row: 1; }
+.target-metric { grid-column: 3; grid-row: 1; }
+dt { font-size: 12px; color: var(--muted); line-height: 1.5; }
+dd { font-family: "Segoe UI", Arial, sans-serif; font-weight: 500; font-variant-numeric: tabular-nums; font-size: 39px; letter-spacing: -1.8px; line-height: 1.35; margin-top: 4px; min-height: 53px; }
+dd .unit { color: #696e61; font: 14px "Segoe UI", sans-serif; margin-left: 5px; letter-spacing: 0; }
+.target-metric dd { font-size: 22px; letter-spacing: -.6px; padding-top: 9px; }
+.sensor-note { border-top: 1px solid var(--line); padding: 10px 20px; color: #737565; font-size: 11px; line-height: 1.5; }
+.voice-panel { min-width: 0; border: 1px solid var(--line); background: var(--paper); border-radius: 12px; overflow: hidden; margin-top: 2px; }
+.voice-panel h2 { display: flex; align-items: center; gap: 8px; }
+.voice-panel h2 svg { width: 16px; height: 16px; fill: none; stroke: #636f58; stroke-width: 1.5; }
+.voice-panel .panel-heading { padding-inline: 18px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+#voice-state { font-size: 11px; max-width: 145px; line-height: 1.5; min-height: 33px; }
+.voice-output>div { min-width: 0; height: 98px; overflow: auto; padding: 15px 18px; scrollbar-width: thin; scrollbar-color: #b7bdab transparent; }
+.voice-output>div:focus-visible { outline-offset: -3px; }
+.voice-output>div+div { border-top: 1px solid var(--line); background: #f3f5ed; }
+h3 { font-size: 10px; color: #707365; font-weight: 650; text-transform: uppercase; letter-spacing: 1.1px; margin-bottom: 10px; }
+.voice-output p { font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+#voice-command { color: #285e45; font-weight: 600; }
+#voice-command[data-accepted="false"] { color: #62675b; font-weight: 400; }
+.command-output[data-feedback="idle"] { background: #f7f5ee; }
+.command-output[data-feedback="rejected"] { background: #fff3df; }
+.command-output[data-feedback="rejected"] h3 { color: #8a531c; }
+details { border-top: 1px solid var(--line); font-size: 12px; padding: 12px 18px; color: #646a5b; }
+summary { cursor: pointer; width: fit-content; }
+details p { margin-top: 10px; line-height: 1.7; }
+footer { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 19px 0 22px; color: #75776a; font-size: 11px; }
+.footer-divider { margin: 0 9px; color: #b4b2a6; }
+@media (min-width: 901px) and (max-width: 1100px) {
+  main { padding-inline: 24px; }
+  .workspace { grid-template-columns: minmax(0, 1fr) 315px; gap: 18px; }
+  .connection-group { gap: 12px; }
+  dd { font-size: 30px; letter-spacing: -1px; }
+  dl>div { padding-inline: 10px; }
+  .target-metric dd { font-size: 17px; }
+  .mirror-note { display: none; }
+}
+@media (max-width: 900px) {
+  main { padding-inline: 16px; }
+  .masthead { padding: 23px 0 18px; min-height: 0; flex-direction: column; align-items: stretch; gap: 22px; margin-bottom: 18px; }
+  h1 { font-size: 24px; }
+  .brand>svg { width: 38px; height: 38px; }
+  .connection-group { justify-content: space-between; gap: 12px; min-height: 48px; }
+  #connection { font-size: 12px; max-width: 45%; }
+  .connect { font-size: 12px; padding: 11px 12px; gap: 6px; }
+  .connect svg { width: 16px; height: 16px; }
+  .workspace { display: flex; flex-direction: column; gap: 16px; }
+  .control-panel { display: contents; }
+  .motion-panel { order: 0; width: 100%; min-height: 180px; padding: 16px; }
+  #state { font-size: 27px; min-height: 0; margin: 0; }
+  #state-detail { min-height: 39px; }
+  .steering-actions { order: 1; width: 100%; position: sticky; top: 8px; z-index: 5; background: #f4f1ea; box-shadow: 0 0 0 6px #f4f1ea; border-radius: 9px; }
+  .camera-panel { order: 2; width: 100%; }
+  .panel-heading { padding: 15px 16px; min-height: 51px; }
+  .camera { height: auto; aspect-ratio: 16/10; }
+  .camera-note { padding: 22px; }
+  .camera-note>svg { width: 40px; height: 40px; margin-bottom: 17px; }
+  .camera-note strong { font-size: 21px; }
+  .camera-note p { font-size: 13px; }
+  .camera-footer { padding-inline: 16px; }
+  .mirror-note { display: none; }
+  .telemetry { order: 3; width: 100%; }
+  .telemetry dl { grid-template-columns: 1fr 1fr; padding: 0 16px 16px; }
+  .distance-metric { grid-column: 2; grid-row: 1; }
+  .target-metric { grid-column: 1/-1; grid-row: 2; display: flex; align-items: center; justify-content: space-between; padding: 12px 0 0; margin-top: 10px; border: 0; border-top: 1px solid var(--line); }
+  dd { font-size: 34px; min-height: 46px; }
+  .target-metric dd { font-size: 16px; min-height: 0; margin: 0; padding: 0; }
+  dl>div { padding-inline: 16px; }
+  .sensor-note { padding-inline: 16px; }
+  .voice-panel { order: 4; width: 100%; margin: 0; }
+  .voice-panel .panel-heading { min-height: 60px; }
+  footer { font-size: 10px; gap: 10px; }
+  footer>span:last-child { white-space: nowrap; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* Preserve Hoot as a compact companion beside camera guidance. */
+#mascot { flex: 0 0 170px; }
+#mascot .lk-card { display: grid; grid-template-columns: 64px 1fr; height: 68px; padding: 0; margin: 0; border: 0; background: transparent; color: #414b37; border-radius: 0; }
+#mascot .lk-stage { grid-column: 1; width: 64px; height: 68px; margin: 0; }
+#mascot .lk-bar { grid-column: 2; display: grid; grid-template-columns: 1fr 32px; grid-template-rows: 1fr 1fr; gap: 0 4px; margin: 0; }
+#mascot .lk-name { grid-column: 1; grid-row: 1; align-self: end; background: transparent; padding: 0; font-size: 12px; color: #4e5c43; }
+#mascot .lk-mood { grid-column: 1; grid-row: 2; align-self: start; font-size: 10px; font-weight: 400; color: #626b58; }
+#mascot .lk-read, #mascot .lk-grow { display: none; }
+#mascot .lk-say { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); min-height: 0; }
+#mascot .lk-snd { grid-column: 2; grid-row: 1/3; align-self: center; min-height: 34px !important; padding: 2px !important; background: #f2eee5 !important; border-color: #cfc9b8 !important; color: #4c5841 !important; font-size: 10px !important; border-radius: 6px !important; }
+@media(max-width:1100px) { #mascot { flex-basis: 134px; } #mascot .lk-card { grid-template-columns: 54px 1fr; } #mascot .lk-stage { width: 54px; } }
+@media(prefers-reduced-motion:reduce) { #mascot * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
 <main>
-  <header><h1>Lookout Rover</h1><p id="connection" role="status">Red Board disconnected</p></header>
-  <div class="layout">
-    <section>
-      <h2>Operator camera</h2>
+  <header class="masthead">
+    <div class="brand"><svg viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="12" fill="currentColor"/><path d="M10 27V13h6v9h14v5z" fill="#fffaf2"/><circle cx="26" cy="14" r="4" fill="#fffaf2"/></svg><div><h1>Lookout Rover</h1><p>Head &amp; voice control</p></div></div>
+    <div class="connection-group"><p id="connection" role="status">Red Board disconnected</p><button id="usb" class="connect"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7 2v4m6-4v4M5 6h10v3a5 5 0 0 1-10 0zm5 8v4"/></svg>Connect Red Board</button></div>
+  </header>
+  <div class="workspace">
+    <section class="camera-panel" aria-labelledby="camera-title">
+      <div class="panel-heading"><h2 id="camera-title">Operator camera</h2><span id="tracking-status">Camera off</span></div>
       <div class="camera">
-        <p id="camera-note" class="camera-note">Enable steering to start your camera and mic.</p>
+        <div id="camera-note" class="camera-note"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="12" width="26" height="24" rx="5"/><path d="m32 20 10-6v20l-10-6"/></svg><strong>Camera is off</strong><p id="camera-instruction">Connect the Red Board, then enable steering.</p></div>
         <video id="video" autoplay muted playsinline></video>
         <canvas id="overlay"></canvas>
+        <div class="camera-corners" aria-hidden="true"></div>
       </div>
-      <p class="help">Look straight to center, then turn your head to steer.</p>
+      <div class="camera-footer"><span id="camera-guidance">Look straight to center. Turn your head to steer.</span><div id="mascot" aria-label="Hoot rover companion"></div></div>
     </section>
-    <section>
-      <div id="mascot"></div>
-      <div class="actions">
-        <button id="usb">Connect Red Board</button>
-        <button id="enable" aria-pressed="false" disabled>Enable steering</button>
-      </div>
-      <p class="help" id="state" role="status">USB disconnected</p>
-      <dl>
-        <dt>Target</dt><dd id="target">—</dd>
-        <dt>Rover heading</dt><dd id="heading">—</dd>
-        <dt>Front distance</dt><dd id="distance">—</dd>
-      </dl>
-      <p id="voice-state" role="status">Mic off</p>
-      <p id="heard" class="help">Heard: —</p>
-      <p id="voice-command" class="help" role="status"></p>
-      <p class="help">For the quickest response, say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop. Say “resume” to drive again.</p>
+    <aside class="control-panel" aria-label="Rover controls and telemetry">
+      <section class="motion-panel" data-tone="offline" id="motion-panel">
+        <div class="eyebrow"><span class="status-dot"></span> Rover status</div>
+        <p id="state" role="status">USB disconnected</p>
+        <p id="state-detail">Connect the Red Board to begin.</p>
+      </section>
+      <div class="steering-actions"><button id="enable" aria-pressed="false" disabled>Enable steering</button><button id="stop" aria-keyshortcuts="Escape" disabled><span aria-hidden="true">■</span> Stop <kbd>Esc</kbd></button></div>
+
+    <section class="voice-panel" aria-labelledby="voice-title">
+      <div class="panel-heading"><h2 id="voice-title"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6"/></svg>Voice control</h2><p id="voice-state" role="status">Mic off</p></div>
+      <div class="voice-output"><div class="transcript" tabindex="0" role="region" aria-label="Microphone transcript"><h3>Mic heard</h3><p id="heard">Heard: —</p></div><div class="command-output" data-feedback="idle" tabindex="0" role="region" aria-label="Rover command feedback"><h3>Rover accepted</h3><p id="voice-command" role="status" data-accepted="false">No command yet</p></div></div>
+      <details><summary>Voice commands</summary><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” to stop, “resume” to drive again, or “recenter” to calibrate.</p></details>
     </section>
+    </aside>
+      <section class="telemetry" aria-labelledby="telemetry-title">
+        <div class="panel-heading"><h2 id="telemetry-title">Rover telemetry</h2><span id="telemetry-status">No data</span></div>
+        <dl>
+          <div class="primary-metric"><dt>Rover heading</dt><dd id="heading">—</dd></div>
+          <div class="target-metric"><dt>Steering target</dt><dd id="target">—</dd></div>
+          <div class="primary-metric distance-metric"><dt>Front distance</dt><dd id="distance">—</dd></div>
+        </dl>
+        <p class="sensor-note">Forward motion pauses below 20 cm.</p>
+      </section>
   </div>
+  <footer><span>Lookout Rover <span class="footer-divider">/</span> Operator console</span><span>Stop anytime <kbd>Esc</kbd></span></footer>
 </main>
 <script>
   class RedBoardConnection {
@@ -313,6 +456,21 @@
     lastControlPose = 0;
   }
 
+  // Presentation only: keep telemetry units quiet without changing control values.
+  function renderMetric(id, text) {
+    const element = byId(id);
+    if (element.dataset.value === text) return;
+    element.dataset.value = text;
+    const match = text.match(/^(.*?)( cm|° left|° right|°)$/);
+    element.replaceChildren(document.createTextNode(match ? match[1] : text));
+    if (match) {
+      const unit = document.createElement("span");
+      unit.className = "unit";
+      unit.textContent = match[2].trim();
+      element.append(unit);
+    }
+  }
+
   function render() {
     usbButton.hidden = socket.ready;
     enableButton.textContent = enabled ? "Disable steering" : "Enable steering";
@@ -325,18 +483,18 @@
     const report = latestStatus && now - latestStatus.at < 650 ? latestStatus : null;
     const hasFace = liveFace(now);
     byId("target").textContent = enabled && neutral !== null && hasFace ? degrees(target()) : "—";
-    byId("heading").textContent = report ? degrees(report.heading) : "—";
-    byId("distance").textContent = report ? (report.distance === null ? "No echo" : report.distance.toFixed(1) + " cm") : "—";
+    renderMetric("heading", report ? degrees(report.heading) : "—");
+    renderMetric("distance", report ? (report.distance === null ? "No echo" : report.distance.toFixed(1) + " cm") : "—");
 
     let reason;
     if (!socket.ready) reason = "USB disconnected";
     else if (!enabled) reason = "Steering off";
-    else if (voiceStop) reason = "Stopped · say “resume”";
+    else if (voiceStop) reason = "Stopped";
     else if (hidden) reason = "Paused · page inactive";
-    else if (trackingError) reason = trackingError;
+    else if (trackingError) reason = "Camera unavailable";
     else if (!tracker || !stream) reason = "Starting camera";
     else if (!hasFace) reason = "Face out of frame";
-    else if (neutral === null) reason = "Look straight to center";
+    else if (neutral === null) reason = "Centering";
     else if (!started) reason = zeroAt && now - zeroAt > 900 ? "No heading reply" : "Setting heading zero";
     else if (!report) reason = "Waiting for rover data";
     else if (report.reason === "POWER_OFF") reason = "Motor power off";
@@ -350,7 +508,41 @@
     else if (translation) reason = translation.base > 0 ? "Driving forward" : "Reversing";
     else if (Math.abs(angleDelta(target() - report.heading)) <= 2.5) reason = "Aligned";
     else reason = "Turning";
+    if (!socket.ready && usbButton.disabled && byId("connection").textContent === "Connecting…") reason = "Connecting";
     if (byId("state").textContent !== reason) byId("state").textContent = reason;
+    const safe = ["Aligned", "Turning", "Driving forward", "Reversing"].includes(reason);
+    const danger = ["Obstacle ahead", "Stopped", "Wheels not moving", "Motor power off"].includes(reason);
+    byId("motion-panel").dataset.tone = danger ? "danger" : safe ? "ready" : "offline";
+    const guidance = {
+      "USB disconnected": "Connect the Red Board to begin.",
+      "Connecting": "Waiting for the Red Board handshake.",
+      "Steering off": "Enable steering to start the camera and mic.",
+      "Stopped": "Say “resume” to drive again.",
+      "Paused · page inactive": "Return to this tab to continue.",
+      "Starting camera": "Allow camera access. Keep your face in view.",
+      "Face out of frame": "Motion paused. Bring your face back into view.",
+      "Centering": "Hold still and look straight at the camera.",
+      "Setting heading zero": "Centering the rover. Hold your head steady.",
+      "No heading reply": "Check the board connection, then recenter.",
+      "Waiting for rover data": "Motion paused until fresh telemetry arrives.",
+      "Obstacle ahead": "Forward motion blocked. Clear the path or reverse.",
+      "Front sensor has no echo": "Forward motion blocked until the sensor responds.",
+      "Wheels not moving": "Check the wheels and motor power.",
+      "Motor power off": "Switch on the rover’s motor power.",
+      "No steering updates": "Motion paused. Waiting for control updates.",
+      "Aligned": "Turn your head to steer. Speak to move.",
+      "Turning": "Following your steering target.",
+      "Driving forward": "Head gestures adjust your direction.",
+      "Reversing": "Moving backward. Check the path behind the rover.",
+    };
+    byId("state-detail").textContent = trackingError && reason === "Camera unavailable" ? trackingError : guidance[reason] || "Motion paused. Check camera and browser permissions.";
+    document.body.dataset.connected = String(socket.ready);
+    document.body.dataset.face = String(Boolean(enabled && hasFace));
+    byId("stop").disabled = !socket.ready;
+    byId("tracking-status").textContent = !enabled ? "Camera off" : !hasFace ? "Finding face" : neutral === null ? "Centering" : "Face tracked";
+    byId("telemetry-status").textContent = report ? "Live" : socket.ready ? "Waiting for data" : "No data";
+    byId("camera-instruction").textContent = socket.ready ? "Enable steering to start your camera and mic." : "Connect the Red Board, then enable steering.";
+    byId("camera-guidance").textContent = enabled && neutral === null ? "Look straight at the camera. Hold still to center." : "Look straight to center. Turn your head to steer.";
   }
 
   function step(now = performance.now(), voiceUpdate = false) {
@@ -611,7 +803,11 @@
     "go forward", "back up", "turn left", "turn right", "stop", "resume", "recenter"];
 
   function voiceFeedback(text) {
-    byId("voice-command").textContent = text;
+    const accepted = text.startsWith("Command: ");
+    byId("voice-command").dataset.accepted = String(accepted);
+    byId("voice-command").closest(".command-output").dataset.feedback = accepted ? "accepted" : text ? "rejected" : "idle";
+    byId("voice-command").textContent = accepted ? text.replace("Command: ", "") : text || "No command yet";
+    byId("voice-command").closest(".command-output").querySelector("h3").textContent = accepted ? "Rover accepted" : text ? "Command not accepted" : "Rover accepted";
   }
 
   function latchStop() {
@@ -948,13 +1144,19 @@
     usbButton.addEventListener("click", async () => {
       usbButton.disabled = true;
       byId("connection").textContent = "Connecting…";
+      render();
       try { await socket.connect(); }
       catch (error) {
         byId("connection").textContent = "USB: " + error.message;
         usbButton.disabled = false;
+        render();
       }
     });
   }
+  byId("stop").addEventListener("click", () => {
+    latchStop();
+    voiceFeedback("Command: stop · button");
+  });
   enableButton.addEventListener("click", () => enabled ? disable() : void enable());
   document.addEventListener("visibilitychange", () => {
     hidden = document.hidden;
@@ -974,6 +1176,7 @@
       voiceFeedback("Command: stop · Esc");
     }
   });
+  render();
   setInterval(() => step(), 32);
 </script>
 <script src="mascot.js"></script>

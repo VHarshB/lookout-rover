@@ -80,12 +80,12 @@ function moodFor(text) {
   const s = (text || "").toLowerCase();
   if (!s || s.includes("usb disconnected") || s.includes("connect the red board")) return "sleep";
   if (s.includes("steering off")) return "idle";
-  if ((s.includes("stopped") && s.includes("resume")) || s.includes("page inactive")) return "holding";
-  if (s.includes("camera permission") || s.includes("camera disconnected") ||
+  if (s.includes("stopped") || s.includes("page inactive")) return "holding";
+  if (s.includes("camera unavailable") || s.includes("camera permission") || s.includes("camera disconnected") ||
       s.includes("model unavailable") || s.includes("tracking restarting")) return "error";
   if (s.includes("starting camera")) return "waking";
   if (s.includes("face out of frame")) return "search";
-  if (s.includes("look straight") || s.includes("heading zero") || s.includes("waiting for rover")) return "focus";
+  if (s === "centering" || s.includes("look straight") || s.includes("heading zero") || s.includes("waiting for rover")) return "focus";
   if (s.includes("no heading reply") || s.includes("no steering updates") || s.includes("command_lost")) return "worried";
   if (s.includes("power off") || s.includes("power_off")) return "power";
   if (s.includes("wheels not moving") || s.includes("stalled")) return "stuck";
@@ -682,7 +682,7 @@ class Mascot {
       const vc = $("voice-command");
       if (vc) {
         const cmd = vc.textContent.trim();
-        if (cmd !== lastHeard && /^command:/i.test(cmd)) this.heard(cmd.replace(/^command:\s*/i, "").replace(/\s*·.*$/, ""));
+        if (cmd !== lastHeard && (/^command:/i.test(cmd) || vc.dataset.accepted === "true")) this.heard(cmd.replace(/^command:\s*/i, "").replace(/\s*·.*$/, ""));
         lastHeard = cmd;
       } else {
         const heard = ($("heard")?.textContent ?? "").replace(/^heard:\s*/i, "").trim();
