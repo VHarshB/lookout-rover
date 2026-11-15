@@ -149,6 +149,7 @@ const CSS = `
 .lk-card[data-fx="signal"] .lk-fx-signal,.lk-card[data-fx="ring"] .lk-fx-ring,.lk-card[data-fx="ear"] .lk-fx-ear,
 .lk-card[data-fx="sparkle"] .lk-fx-sparkle,.lk-card[data-fx="beep"] .lk-fx-beep{display:inline}
 .lk-fx *{transform-box:fill-box}
+@media (prefers-reduced-motion:reduce){.lk-sheen{display:none}}
 .lk-fx-zzz text{animation:lk-float 2.4s infinite ease-out;opacity:0;transform-origin:center}
 .lk-fx-zzz text:nth-child(2){animation-delay:.8s}.lk-fx-zzz text:nth-child(3){animation-delay:1.6s}
 @keyframes lk-float{0%{opacity:0;transform:translate(0,6px) scale(.7)}25%{opacity:1}100%{opacity:0;transform:translate(16px,-34px) scale(1.15)}}
@@ -185,12 +186,13 @@ const CSS = `
 
 // Eye centres and radius (viewBox 0 0 320 340).
 const L = {x: 116, y: 150}, R = {x: 204, y: 150}, ER = 36;
-const DISC = "#3d4867";
+const DISC = "#cdb8f4";          // lilac face discs (eyelids use the same colour)
+const GOLD = "#ecc66a";          // thin golden outline
 
 const eyeSVG = (side, c) => `
   <g class="lk-eye${side}">
     <g clip-path="url(#lkClip${side})">
-      <circle cx="${c.x}" cy="${c.y}" r="${ER}" fill="#121828"/>
+      <circle cx="${c.x}" cy="${c.y}" r="${ER}" fill="#1b1436"/>
       <g class="lk-look${side}">
         <circle cx="${c.x}" cy="${c.y}" r="31" fill="url(#lkIris)"/>
         <circle class="lk-pup${side}" cx="${c.x}" cy="${c.y}" r="13" fill="#120d06"/>
@@ -200,26 +202,32 @@ const eyeSVG = (side, c) => `
       <rect class="lk-lid${side}" x="${c.x - 64}" y="${c.y - ER - 90}" width="128" height="90" fill="${DISC}"/>
       <ellipse class="lk-low${side}" cx="${c.x}" cy="${c.y + 82}" rx="52" ry="44" fill="${DISC}"/>
     </g>
-    <circle cx="${c.x}" cy="${c.y}" r="${ER}" fill="none" stroke="#1d2438" stroke-width="4"/>
-    <path class="lk-shut" d="M${c.x - 22} ${c.y + 2} q22 14 44 0" fill="none" stroke="#141a2a" stroke-width="5" stroke-linecap="round" opacity="0"/>
+    <circle cx="${c.x}" cy="${c.y}" r="${ER}" fill="none" stroke="${GOLD}" stroke-width="2.2"/>
+    <path class="lk-shut" d="M${c.x - 22} ${c.y + 2} q22 14 44 0" fill="none" stroke="#4b2a7a" stroke-width="5" stroke-linecap="round" opacity="0"/>
   </g>`;
 
 const wheelSVG = (x) => `
   <g>
-    <circle cx="${x}" cy="312" r="21" fill="#171c2b" stroke="#4b5675" stroke-width="4"/>
+    <circle cx="${x}" cy="312" r="21" fill="#1d1638"/><circle cx="${x}" cy="312" r="20" fill="none" stroke="${GOLD}" stroke-width="1.6"/>
     <g class="lk-spokes" data-x="${x}">
-      <line x1="${x}" y1="296" x2="${x}" y2="328" stroke="#6c7aa0" stroke-width="3" stroke-linecap="round"/>
-      <line x1="${x - 16}" y1="312" x2="${x + 16}" y2="312" stroke="#6c7aa0" stroke-width="3" stroke-linecap="round"/>
+      <line x1="${x}" y1="296" x2="${x}" y2="328" stroke="#cdb8f4" stroke-width="3" stroke-linecap="round"/>
+      <line x1="${x - 16}" y1="312" x2="${x + 16}" y2="312" stroke="#cdb8f4" stroke-width="3" stroke-linecap="round"/>
     </g>
-    <circle cx="${x}" cy="312" r="5" fill="#9aa7c7"/>
+    <circle cx="${x}" cy="312" r="5" fill="${GOLD}"/>
   </g>`;
 
+const FEATHER = {o: "#ff8a3d", c: "#d7263d", p: "#ff7eb6"};   // orange, crimson, pink tips
 const chevrons = () => {
-  let d = "";
-  for (const [y, xs] of [[236, [136, 160, 184]], [256, [124, 148, 172, 196]], [276, [136, 160, 184]]]) {
-    for (const x of xs) d += `M${x - 7} ${y}q7 7 14 0`;
+  const rows = [[236, [[136, "o"], [160, "c"], [184, "o"]]],
+                [256, [[124, "p"], [148, "o"], [172, "o"], [196, "p"]]],
+                [276, [[136, "c"], [160, "p"], [184, "c"]]]];
+  let out = "";
+  for (const [y, feathers] of rows) {
+    for (const [x, k] of feathers) {
+      out += `<path d="M${x - 8} ${y}q8 8 16 0" fill="none" stroke="${FEATHER[k]}" stroke-width="3" stroke-linecap="round"/>`;
+    }
   }
-  return `<path d="${d}" fill="none" stroke="#7b88ad" stroke-width="2.4" stroke-linecap="round" opacity=".55"/>`;
+  return out;
 };
 
 const SVG = `
@@ -234,35 +242,63 @@ const SVG = `
       <stop class="lk-haloA" offset="0%" stop-color="#ffb547" stop-opacity=".55"/>
       <stop class="lk-haloB" offset="100%" stop-color="#ffb547" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="lkBody" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#3a4566"/><stop offset="100%" stop-color="#262e47"/>
+    <linearGradient id="lkBody" x1="0" y1="0" x2=".35" y2="1">
+      <stop offset="0%" stop-color="#7fdcf0"/><stop offset="38%" stop-color="#2f9ed3"/>
+      <stop offset="78%" stop-color="#2463aa"/><stop offset="100%" stop-color="#4b3f9e"/>
     </linearGradient>
+    <linearGradient id="lkSheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e9fdff" stop-opacity="0"/>
+      <stop offset=".42" stop-color="#e9fdff" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#e9fdff" stop-opacity=".5"/>
+      <stop offset=".58" stop-color="#e9fdff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#e9fdff" stop-opacity="0"/>
+      <animateTransform attributeName="gradientTransform" type="translate" values="-1 -1; 1 1; 1 1" keyTimes="0; .4; 1" dur="5.5s" repeatCount="indefinite"/>
+    </linearGradient>
+    <linearGradient id="lkBelly" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff4c4"/><stop offset="100%" stop-color="#ffd98c"/>
+    </linearGradient>
+    <linearGradient id="lkWing" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#cdb8f4"/><stop offset="45%" stop-color="#e2557a"/><stop offset="100%" stop-color="#d7263d"/>
+    </linearGradient>
+    <linearGradient id="lkTuft" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffb347"/><stop offset="100%" stop-color="#e2452f"/>
+    </linearGradient>
+    <clipPath id="lkWingClipL"><ellipse cx="58" cy="232" rx="25" ry="58"/></clipPath>
+    <clipPath id="lkWingClipR"><ellipse cx="262" cy="232" rx="25" ry="58"/></clipPath>
     <clipPath id="lkClipL"><circle cx="${L.x}" cy="${L.y}" r="${ER}"/></clipPath>
     <clipPath id="lkClipR"><circle cx="${R.x}" cy="${R.y}" r="${ER}"/></clipPath>
   </defs>
   <ellipse cx="160" cy="333" rx="96" ry="8" fill="#000" opacity=".35"/>
   <g class="lk-all">
     <g class="lk-wheels">${wheelSVG(108)}${wheelSVG(212)}</g>
-    <g class="lk-wingL"><ellipse cx="58" cy="232" rx="25" ry="58" fill="#232b44" stroke="#1a2035" stroke-width="3"/></g>
-    <g class="lk-wingR"><ellipse cx="262" cy="232" rx="25" ry="58" fill="#232b44" stroke="#1a2035" stroke-width="3"/></g>
-    <g class="lk-tuftL"><path d="M66 132 L72 50 L130 104 Z" fill="#2f3854" stroke="#1a2035" stroke-width="3" stroke-linejoin="round"/>
+    <g class="lk-wingL"><ellipse cx="58" cy="232" rx="25" ry="58" fill="url(#lkWing)"/>
+      <g clip-path="url(#lkWingClipL)" fill="#ff7eb6"><circle cx="44" cy="290" r="11"/><circle cx="58" cy="294" r="11"/><circle cx="72" cy="290" r="11"/></g>
+      <path d="M50 200q8 30 0 62M64 196q8 34 2 70" fill="none" stroke="#fbe3ff" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+      <ellipse cx="58" cy="232" rx="25" ry="58" fill="none" stroke="${GOLD}" stroke-width="1.6"/></g>
+    <g class="lk-wingR"><ellipse cx="262" cy="232" rx="25" ry="58" fill="url(#lkWing)"/>
+      <g clip-path="url(#lkWingClipR)" fill="#ff7eb6"><circle cx="248" cy="290" r="11"/><circle cx="262" cy="294" r="11"/><circle cx="276" cy="290" r="11"/></g>
+      <path d="M270 200q-8 30 0 62M256 196q-8 34-2 70" fill="none" stroke="#fbe3ff" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+      <ellipse cx="262" cy="232" rx="25" ry="58" fill="none" stroke="${GOLD}" stroke-width="1.6"/></g>
+    <g class="lk-tuftL"><path d="M66 132 L72 50 L130 104 Z" fill="url(#lkTuft)"/><path d="M69 84 L72 50 L95 74 Z" fill="#ff7eb6"/><path d="M66 132 L72 50 L130 104 Z" fill="none" stroke="${GOLD}" stroke-width="1.6" stroke-linejoin="round"/>
       <circle class="lk-led lk-ledL" cx="73" cy="54" r="7" fill="#ffb547"/></g>
-    <g class="lk-tuftR"><path d="M254 132 L248 50 L190 104 Z" fill="#2f3854" stroke="#1a2035" stroke-width="3" stroke-linejoin="round"/>
+    <g class="lk-tuftR"><path d="M254 132 L248 50 L190 104 Z" fill="url(#lkTuft)"/><path d="M251 84 L248 50 L225 74 Z" fill="#ff7eb6"/><path d="M254 132 L248 50 L190 104 Z" fill="none" stroke="${GOLD}" stroke-width="1.6" stroke-linejoin="round"/>
       <circle class="lk-led lk-ledR" cx="247" cy="54" r="7" fill="#ffb547"/></g>
-    <ellipse cx="160" cy="205" rx="112" ry="116" fill="url(#lkBody)" stroke="#1a2035" stroke-width="4"/>
-    <ellipse cx="160" cy="258" rx="66" ry="50" fill="#465273" opacity=".85"/>
+    <ellipse cx="160" cy="205" rx="112" ry="116" fill="url(#lkBody)"/>
+    <ellipse class="lk-sheen" cx="160" cy="205" rx="112" ry="116" fill="url(#lkSheen)"/>
+    <ellipse cx="160" cy="205" rx="112" ry="116" fill="none" stroke="${GOLD}" stroke-width="2"/>
+    <ellipse cx="160" cy="258" rx="66" ry="50" fill="url(#lkBelly)" stroke="${GOLD}" stroke-width="1.6"/>
     ${chevrons()}
     <g class="lk-head">
       <circle class="lk-halo" cx="160" cy="150" r="118" fill="url(#lkHalo)"/>
-      <circle cx="${L.x}" cy="${L.y}" r="55" fill="#56638a"/><circle cx="${R.x}" cy="${R.y}" r="55" fill="#56638a"/>
+      <circle cx="${L.x}" cy="${L.y}" r="52.8" fill="${GOLD}"/><circle cx="${R.x}" cy="${R.y}" r="52.8" fill="${GOLD}"/>
       <circle cx="${L.x}" cy="${L.y}" r="51" fill="${DISC}"/><circle cx="${R.x}" cy="${R.y}" r="51" fill="${DISC}"/>
       ${eyeSVG("L", L)}${eyeSVG("R", R)}
-      <line class="lk-browL" x1="${L.x - 30}" y1="${L.y - 52}" x2="${L.x + 26}" y2="${L.y - 48}" stroke="#cfd8f0" stroke-width="7" stroke-linecap="round"/>
-      <line class="lk-browR" x1="${R.x + 30}" y1="${R.y - 52}" x2="${R.x - 26}" y2="${R.y - 48}" stroke="#cfd8f0" stroke-width="7" stroke-linecap="round"/>
-      <ellipse class="lk-blush" cx="88" cy="200" rx="15" ry="7" fill="#ff8fa3" opacity="0"/>
-      <ellipse class="lk-blush" cx="232" cy="200" rx="15" ry="7" fill="#ff8fa3" opacity="0"/>
-      <path class="lk-beakLo" d="M150 189 L170 189 L160 205 Z" fill="#d9a54a" stroke="#8a5f1c" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M147 189 L160 171 L173 189 Z" fill="#f2c46d" stroke="#8a5f1c" stroke-width="2" stroke-linejoin="round"/>
+      <line class="lk-browL" x1="${L.x - 30}" y1="${L.y - 52}" x2="${L.x + 26}" y2="${L.y - 48}" stroke="#5b2a86" stroke-width="7" stroke-linecap="round"/>
+      <line class="lk-browR" x1="${R.x + 30}" y1="${R.y - 52}" x2="${R.x - 26}" y2="${R.y - 48}" stroke="#5b2a86" stroke-width="7" stroke-linecap="round"/>
+      <ellipse class="lk-blush" cx="88" cy="200" rx="15" ry="7" fill="#ff7eb6" opacity="0"/>
+      <ellipse class="lk-blush" cx="232" cy="200" rx="15" ry="7" fill="#ff7eb6" opacity="0"/>
+      <path class="lk-beakLo" d="M150 189 L170 189 L160 205 Z" fill="#f6a12a" stroke="#b8862b" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M147 189 L160 171 L173 189 Z" fill="#ffd84f" stroke="#b8862b" stroke-width="1.6" stroke-linejoin="round"/>
     </g>
   </g>
   <g class="lk-fx">
