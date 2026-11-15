@@ -447,11 +447,10 @@ class Mascot {
     const line = LINES[id];
     if (!line) return;
     this.showBubble(line.caption || line.say, line.say ? 4200 : 1e9);
-    if (line.say) this.speak(line.say, id);
-    window.LookoutTranscript?.add({
-      speaker: "hoot", kind: "line", lineId: id,
-      text: line.say || line.caption, audible: Boolean(line.say && this.sound),
-    });
+    const audible = line.say ? this.speak(line.say, id) : false;
+    try {
+      window.LookoutTranscript?.add({speaker: "hoot", kind: "line", lineId: id, text: line.say || line.caption, audible});
+    } catch (_) {}
   }
   toggleSound() {
     this.setSound(!this.sound);
@@ -536,10 +535,12 @@ class Mascot {
   }
   hideBubble() { this.el.bubble.classList.remove("show"); this.bubbleUntil = 0; this.persistent = false; }
 
+  // Returns true when the line was sent to audio (Polly clip or browser TTS), false when skipped.
   speak(text, id) {
-    if (!this.sound) return;
+    if (!this.sound) return false;
+    if (!this.opts.audioBase && !("speechSynthesis" in window)) return false;
     const now = performance.now();
-    if (now - this.lastSpeakAt < 1200 && this.speaking) return;   // don't pile up lines
+    if (now - this.lastSpeakAt < 1200 && this.speaking) return false;   // don't pile up lines
     this.lastSpeakAt = now;
     const generation = this.audioGeneration;
     const canPlay = () => this.sound && this.audioGeneration === generation;
@@ -565,6 +566,7 @@ class Mascot {
       a.onerror = () => { if (canPlay()) { this.speaking = false; tts(); } };
       a.play().catch(tts);
     } else tts();
+    return true;
   }
 
   chirp(kind) {

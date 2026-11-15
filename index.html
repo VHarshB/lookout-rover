@@ -284,14 +284,14 @@ summary { cursor: pointer; width: fit-content; }
   </div>
   <section class="secondary" aria-label="Operator help">
     <details><summary>Steering &amp; voice help</summary><div class="help-content"><p id="camera-guidance">Look straight to center. Turn your head to steer.</p><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop, “resume” to drive again, or “recenter” to calibrate.</p><p>Forward motion pauses below 20 cm or when the front sensor has no echo. Motion pauses when tracking or rover data is lost.</p><p>The camera view is mirrored. Use desktop Chrome or Edge over HTTPS. Close XRPCode before connecting the Red Board.</p></div></details>
-    <details id="transcript-panel"><summary>Voice transcript</summary><div class="transcript-log help-content">
+    <details id="transcript-panel"><summary>Voice log</summary><div class="transcript-log help-content">
       <p id="transcript-status" role="status">No voice activity recorded yet. Stored only in this browser.</p>
       <div class="phone-actions">
         <button id="transcript-csv" type="button">Download CSV</button>
         <button id="transcript-json" type="button">Download JSON</button>
         <button id="transcript-clear" type="button">Clear</button>
       </div>
-      <ol id="transcript-list" aria-label="Voice transcript, newest first"></ol>
+      <ol id="transcript-list" aria-label="Voice log, newest first"></ol>
     </div></details>
     <details><summary>Steering diagnostics</summary><pre id="steering-diagnostics" style="white-space:pre-wrap;overflow-wrap:anywhere" aria-live="off"></pre></details>
     <details><summary>Phone camera setup</summary>
@@ -315,7 +315,7 @@ summary { cursor: pointer; width: fit-content; }
 <aside id="mascot" aria-label="Hoot rover companion"></aside>
 <script defer src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script defer src="phone-video.js?v=5"></script>
-<script src="transcript-log.js?v=1"></script>
+<script src="transcript-log.js?v=2"></script>
 <script>
   // The XRP's Bluetooth REPL uses the Nordic UART service.
   const XRP_UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
@@ -665,6 +665,79 @@ summary { cursor: pointer; width: fit-content; }
   let motionBlock = null;
   let voiceDraft = null, ignoredVoiceIndex = -1, lastFinalVoiceIndex = -1, lastInterimVoiceIndex = -1;
 
+  // ---------- voice log (transcript-log.js) ----------
+  // Best effort only: every call is guarded so logging can never interrupt steering or a stop.
+  // heardLog maps a recognition result index (per recognition session) → pending entry id.
+  let heardLog = new Map(), lastHeard = null, lastReply = null, lastFirmwareReason = null;
+
+  function voiceLog(entry) {
+    try { return window.LookoutTranscript?.add(entry) ?? Promise.resolve(null); }
+    catch (_) { return Promise.resolve(null); }
+  }
+
+  function roverContext() {
+    const now = performance.now();
+    const report = latestStatus && now - latestStatus.at < 650 ? latestStatus : null;
+    return {
+      state: byId("state").textContent,
+      heading: report ? report.heading : null,
+      distance: report ? report.distance : undefined,   // null = no echo
+      target: enabled && neutral !== null && liveFace(now) ? target() : null,
+    };
+  }
+  try { window.LookoutTranscript?.setContext(roverContext); } catch (_) {}
+
+  function logHeard(index, transcript, final, command, source, confidence) {
+    try {
+      if (!transcript) return;
+      const entry = {speaker: "operator", kind: "speech", text: transcript, final, command, source, confidence};
+      const known = heardLog.get(index);
+      if (known) {
+        known.then(id => window.LookoutTranscript?.update(id, entry)).catch(() => {});
+      } else {
+        const pending = voiceLog(entry);
+        heardLog.set(index, pending);
+        lastHeard = {pending, at: performance.now()};
+      }
+    } catch (_) {}
+  }
+
+  function logReply(text, accepted, action) {
+    try {
+      if (!text) return;
+      const now = performance.now();
+      const source = accepted ? text.split(" · ")[1] : undefined;
+      if (accepted && (source === "button" || source === "Esc")) {
+        // Manual stops are the operator's hands, not their last phrase.
+        voiceLog({speaker: "rover", kind: "stop", cause: source, command: "stop", outcome: "accepted",
+          text: source === "Esc" ? "Stopped by Esc key" : "Stopped by Stop button"});
+        return;
+      }
+      if (lastReply && lastReply.text === text && lastReply.heard === lastHeard && now - lastReply.at < 2000) return;
+      lastReply = {text, heard: lastHeard, at: now};
+      const parent = lastHeard && now - lastHeard.at < 4000 ? lastHeard.pending : Promise.resolve(null);
+      const entry = {
+        speaker: "rover", kind: "feedback", source,
+        text: accepted ? "Accepted: " + action : text,
+        outcome: accepted ? "accepted" : /unclear|phrase changed/i.test(text) ? "unclear" : "rejected",
+        command: accepted ? action : undefined,
+        rover: roverContext(),   // the moment of the reply, not when the parent id resolves
+      };
+      parent.then(replyTo => voiceLog({...entry, replyTo})).catch(() => {});
+    } catch (_) {}
+  }
+
+  function logStop(reason) {
+    try {
+      // Voice "stop" and the Stop button / Esc are already logged as replies.
+      if (/^(?:Voice stop|Stop button)/.test(reason)) return;
+      const voice = /^Voice draft/.test(reason);
+      const parent = voice && lastHeard ? lastHeard.pending : Promise.resolve(null);
+      const entry = {speaker: "rover", kind: "stop", cause: voice ? "voice" : "system", text: "Stopped: " + reason, rover: roverContext()};
+      parent.then(replyTo => voiceLog({...entry, replyTo})).catch(() => {});
+    } catch (_) {}
+  }
+
   const clamp = (n, max) => Math.max(-max, Math.min(max, n));
   const angleDelta = a => ((a + 180) % 360 + 360) % 360 - 180;
   const degrees = a => Math.abs(a) < 1 ? "0°" : Math.round(Math.abs(a)) + (a > 0 ? "° left" : "° right");
@@ -676,6 +749,7 @@ summary { cursor: pointer; width: fit-content; }
   };
 
   function stopMotion(reason = "Motion cancelled") {
+    const wasMoving = lastMotion !== "" && lastMotion !== "stop";   // "" = nothing sent yet
     if (lastMotion !== "stop") {
       steeringPauses.push(new Date().toISOString() + " - " + reason);
       if (steeringPauses.length > 12) steeringPauses.shift();
@@ -683,6 +757,7 @@ summary { cursor: pointer; width: fit-content; }
     }
     lastMotion = "stop";
     translation = null;
+    if (wasMoving) logStop(reason);   // after the stop is sent
   }
 
   function calibrate() {
@@ -1155,39 +1230,6 @@ summary { cursor: pointer; width: fit-content; }
   const speechHints = ["rover forward", "rover reverse", "rover left", "rover right",
     "go forward", "back up", "turn left", "turn right", "stop", "resume", "recenter"];
 
-  // Transcript log: result index (per recognition session) → pending entry id.
-  let heardLog = new Map(), lastHeard = null, lastReply = null;
-
-  function logHeard(index, transcript, final, command, source) {
-    const log = window.LookoutTranscript;
-    if (!log || !transcript) return;
-    const entry = {speaker: "operator", kind: "speech", text: transcript, final, command, source};
-    const known = heardLog.get(index);
-    if (known) {
-      known.then(id => log.update(id, entry));
-    } else {
-      const pending = log.add(entry).catch(() => null);
-      heardLog.set(index, pending);
-      lastHeard = {pending, at: performance.now()};
-    }
-  }
-
-  function logReply(text, accepted, action) {
-    const log = window.LookoutTranscript;
-    if (!log || !text) return;
-    const now = performance.now();
-    if (lastReply && lastReply.text === text && lastReply.heard === lastHeard && now - lastReply.at < 2000) return;
-    lastReply = {text, heard: lastHeard, at: now};
-    const parent = lastHeard && now - lastHeard.at < 4000 ? lastHeard.pending : Promise.resolve(null);
-    parent.then(replyTo => log.add({
-      speaker: "rover", kind: "feedback", replyTo,
-      text: accepted ? "Accepted: " + action : text,
-      outcome: accepted ? "accepted" : "rejected",
-      command: accepted ? action : undefined,
-      source: accepted ? text.split(" · ")[1] : undefined,
-    })).catch(() => {});
-  }
-
   function voiceFeedback(text) {
     const accepted = text.startsWith("Command: ");
     byId("voice-command").dataset.accepted = String(accepted);
@@ -1265,11 +1307,11 @@ summary { cursor: pointer; width: fit-content; }
     if (message) voiceFeedback(message);
   }
 
-  function previewVoice(index, command, source, transcript) {
+  function previewVoice(index, command, source, transcript, confidence) {
     if (voiceDraft || ignoredVoiceIndex === index || !canMove(performance.now())) return;
     const draft = {index, command, applied: false, previousYaw: yawOffset};
     voiceDraft = draft;
-    logHeard(index, transcript, false, command, source);
+    logHeard(index, transcript, false, command, source, confidence);
     draft.applied = applyVoiceCommand(command, source);
     draft.confirmTimer = setTimeout(() => {
       if (voiceDraft === draft) discardVoiceDraft("Voice was unclear · repeat the command");
@@ -1285,6 +1327,7 @@ summary { cursor: pointer; width: fit-content; }
       if (i <= lastFinalVoiceIndex) continue;
       const item = event.results[i];
       const transcript = item[0]?.transcript.trim() ?? "";
+      const confidence = item[0]?.confidence;
       if (item.isFinal) {
         lastFinalVoiceIndex = i;
         if (lastInterimVoiceIndex <= i) lastInterimVoiceIndex = -1;
@@ -1299,7 +1342,7 @@ summary { cursor: pointer; width: fit-content; }
       const phrase = spokenCommand.replace(politePrefix, "").replace(/ (?:please|now)$/, "");
       const stop = /^(?:stop|halt|brake|freeze)(?: (?:moving|the rover|rover))?$/.test(phrase);
       if (stop) {
-        logHeard(i, transcript, item.isFinal, "stop", source);
+        logHeard(i, transcript, item.isFinal, "stop", source, confidence);
         applyVoiceCommand("stop", source);
         ignoredVoiceIndex = i;
         return;
@@ -1307,7 +1350,7 @@ summary { cursor: pointer; width: fit-content; }
       const command = localVoiceCommands.get(phrase) ??
         localVoiceCommands.get(phrase.replace(/ (?:a little|a bit)$/, ""));
       const quick = addressed && quickVoicePhrases.has(spokenCommand);
-      if (item.isFinal && transcript) logHeard(i, transcript, true, command, source);
+      if (item.isFinal && transcript) logHeard(i, transcript, true, command, source, confidence);
       if (voiceDraft) {
         if (voiceDraft.index !== i || voiceDraft.command !== command || (!item.isFinal && !quick)) {
           discardVoiceDraft("Phrase changed · repeat the command");
@@ -1315,7 +1358,7 @@ summary { cursor: pointer; width: fit-content; }
       }
       if (i === ignoredVoiceIndex || !transcript) continue;
       if (!item.isFinal) {
-        if (quick) previewVoice(i, command, source, transcript);
+        if (quick) previewVoice(i, command, source, transcript, confidence);
         continue;
       }
       if (command) {
@@ -1594,12 +1637,16 @@ summary { cursor: pointer; width: fit-content; }
     const detail = socket.version === 2 ? socket.session.label : "controller update available";
     byId("connection").textContent = "Red Board connected · " + detail;
     render();
+    lastFirmwareReason = null;
+    voiceLog({speaker: "rover", kind: "connection", outcome: "connected", text: "Red Board connected · " + detail});
   };
   socket.onclose = message => {
     disable();
     latestStatus = null;
     byId("connection").textContent = message || "Red Board disconnected";
     render();
+    lastFirmwareReason = null;
+    voiceLog({speaker: "rover", kind: "connection", outcome: "disconnected", text: message || "Red Board disconnected"});
   };
   socket.onmessage = event => {
     const message = JSON.parse(event.data);
@@ -1609,6 +1656,10 @@ summary { cursor: pointer; width: fit-content; }
       latestStatus = {...message, at: performance.now()};
     }
     step();
+    if (message.kind === "status" && message.reason !== lastFirmwareReason) {
+      lastFirmwareReason = message.reason;   // log changes only, not every poll
+      voiceLog({speaker: "rover", kind: "status", source: "firmware", text: "Firmware status: " + (message.reason || "unknown")});
+    }
   };
 
   if (!(hasUsb || hasBluetooth)) {
@@ -1783,6 +1834,6 @@ summary { cursor: pointer; width: fit-content; }
     if (saved) showViewer(saved);
   });
 </script>
-<script src="mascot.js?v=57000226d4df"></script>
+<script src="mascot.js?v=3b982d3926ce"></script>
 </body>
 </html>

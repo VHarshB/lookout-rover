@@ -1,14 +1,18 @@
 // Voice transcript log for the Lookout Rover console.
 //
 // Keeps every voice exchange in this browser's IndexedDB so it survives reloads:
-//   speaker "operator" – what the mic heard (final phrases, plus interim phrases
-//                        that already moved or stopped the rover)
-//   speaker "rover"    – the console's reply to that phrase (accepted / rejected)
-//   speaker "hoot"     – lines Hoot showed or spoke
+//   speaker "operator" – what the mic heard: final phrases (plus stop words and quick
+//                        commands acted on before the phrase ended), matched command,
+//                        recognizer and its confidence
+//   speaker "rover"    – replies to commands (accepted / rejected / unclear), firmware
+//                        status changes, connects/disconnects and the reason for each stop
+//   speaker "hoot"     – lines Hoot said, and whether they were spoken or caption only
+// Every entry also carries a snapshot of the rover (state, heading, distance, target).
 // Nothing leaves the machine; use the panel's download buttons to export.
 //
-// API: window.LookoutTranscript.add(entry) → Promise<id>
-//      .update(id, patch), .all(), .clear(), .download("csv" | "json"), .sessionId
+// API: window.LookoutTranscript.add(entry) → Promise<id | null>  (never rejects)
+//      .update(id, patch), .all(), .clear(), .download("csv" | "json"),
+//      .setContext(() => ({state, heading, distance, target})), .sessionId
 (() => {
 "use strict";
 
@@ -50,6 +54,19 @@ function tx(db, mode, run) {
   });
 }
 
+// The console registers a function returning what the rover is doing right now
+// ({state, heading, distance, target}); it is captured on every new entry.
+let contextFn = null;
+function setContext(fn) { contextFn = typeof fn === "function" ? fn : null; }
+function snapshot() {
+  try {
+    const c = contextFn?.();
+    if (!c || typeof c !== "object") return undefined;
+    const num = v => typeof v === "number" && Number.isFinite(v) ? Math.round(v * 10) / 10 : v === null ? null : undefined;
+    return {state: c.state ? String(c.state) : undefined, heading: num(c.heading), distance: num(c.distance), target: num(c.target)};
+  } catch (_) { return undefined; }
+}
+
 function clean(entry) {
   const out = {
     at: new Date().toISOString(),
@@ -57,11 +74,12 @@ function clean(entry) {
     speaker: entry.speaker,
     text: String(entry.text ?? "").slice(0, 500),
   };
-  for (const key of ["kind", "command", "outcome", "source", "lineId", "replyTo"]) {
+  for (const key of ["kind", "command", "outcome", "source", "cause", "lineId", "replyTo", "rover"]) {
     if (entry[key] !== undefined && entry[key] !== null && entry[key] !== "") out[key] = entry[key];
   }
   if (typeof entry.final === "boolean") out.final = entry.final;
   if (typeof entry.audible === "boolean") out.audible = entry.audible;
+  if (typeof entry.confidence === "number" && Number.isFinite(entry.confidence)) out.confidence = Math.round(entry.confidence * 1000) / 1000;
   return out;
 }
 
@@ -94,9 +112,17 @@ function schedulePrune() {
   }, 2000);
 }
 
+// add/update never throw or reject: logging must not be able to break steering.
 async function add(entry) {
+  try { return await addEntry(entry); } catch (error) { console.warn("Voice log entry dropped:", error); return null; }
+}
+async function update(id, patch) {
+  try { await updateEntry(id, patch); } catch (error) { console.warn("Voice log update dropped:", error); }
+}
+
+async function addEntry(entry) {
   if (!entry || !entry.speaker || !String(entry.text ?? "").trim()) return null;
-  const record = clean(entry);
+  const record = clean({...entry, rover: entry.rover ?? snapshot()});   // snapshot before any await
   const db = await openDb();
   if (db) {
     try { record.id = await tx(db, "readwrite", s => s.add(record)); }
@@ -110,7 +136,7 @@ async function add(entry) {
   return record.id;
 }
 
-async function update(id, patch) {
+async function updateEntry(id, patch) {
   if (id === null || id === undefined) return;
   const current = recent.find(r => r.id === id) || memory.find(r => r.id === id);
   const db = await openDb();
@@ -140,13 +166,16 @@ async function clear() {
   for (const fn of listeners) { try { fn(null); } catch (_) {} }
 }
 
-const COLUMNS = ["at", "session", "speaker", "kind", "text", "command", "outcome", "source", "final", "audible", "lineId", "id", "replyTo"];
+const COLUMNS = ["at", "session", "speaker", "kind", "text", "command", "outcome", "confidence", "source", "cause",
+  "final", "audible", "lineId", "id", "replyTo", "rover_state", "rover_heading", "rover_distance", "rover_target"];
 function toCsv(rows) {
   const cell = v => {
     const s = v === undefined || v === null ? "" : String(v);
     return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  return [COLUMNS.join(",")].concat(rows.map(r => COLUMNS.map(c => cell(r[c])).join(","))).join("\r\n");
+  const flat = r => ({...r, rover_state: r.rover?.state, rover_heading: r.rover?.heading,
+    rover_distance: r.rover ? (r.rover.distance === null ? "no echo" : r.rover.distance) : undefined, rover_target: r.rover?.target});
+  return [COLUMNS.join(",")].concat(rows.map(r => { const f = flat(r); return COLUMNS.map(c => cell(f[c])).join(","); })).join("\r\n");
 }
 
 async function download(format = "csv") {
@@ -187,8 +216,14 @@ function bindPanel() {
       who.textContent = SPEAKER[r.speaker] || r.speaker;
       const text = document.createElement("span");
       text.textContent = r.text;
-      const meta = [r.command && "→ " + r.command, r.outcome, r.source, r.final === false && "interim",
-        r.speaker === "hoot" && r.audible === false && "muted"].filter(Boolean).join(" · ");
+      const rv = r.rover;
+      const roverMeta = rv && [rv.state, typeof rv.distance === "number" ? rv.distance + " cm" : rv.distance === null ? "no echo" : ""]
+        .filter(Boolean).join(", ");
+      const meta = [r.command && "→ " + r.command, r.outcome, r.source,
+        typeof r.confidence === "number" && r.confidence > 0 && Math.round(r.confidence * 100) + "% sure",
+        r.final === false && "before phrase ended",
+        r.speaker === "hoot" && (r.audible ? "spoken" : "caption only"),
+        roverMeta && "rover: " + roverMeta].filter(Boolean).join(" · ");
       li.append(time, who, text);
       if (meta) { const m = document.createElement("small"); m.textContent = meta; li.append(m); }
       return li;
@@ -224,7 +259,7 @@ function bindPanel() {
   });
 }
 
-window.LookoutTranscript = {add, update, all, clear, download, sessionId};
+window.LookoutTranscript = {add, update, all, clear, download, setContext, sessionId};
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bindPanel);
 else bindPanel();
 })();
