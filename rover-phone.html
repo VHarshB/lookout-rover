@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#211a36">
+<title>Lookout Rover · Phone camera</title>
+<style>
+  :root { color-scheme: dark; font-family: 'Segoe UI', system-ui, sans-serif; background: #211a36; color: #f5f3fc; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  main { max-width: 40rem; margin: auto; padding: 1.5rem max(1.125rem, env(safe-area-inset-right)) max(1.5rem, env(safe-area-inset-bottom)) max(1.125rem, env(safe-area-inset-left)); }
+  h1 { margin: 0; font-size: 1.65rem; } h2 { font-size: 1.1rem; margin: 0; }
+  header p { margin: .35rem 0 1.1rem; color: #ded2ed; }
+  .preview { aspect-ratio: 16 / 9; background: #151122; border-radius: .75rem; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: contain; }
+  p { line-height: 1.45; }
+  .actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+  button { font: inherit; color: #f5f3fc; background: #34284e; border: 1px solid #8d7ba5; border-radius: .6rem; padding: .65rem .85rem; min-height: 44px; }
+  button.primary { background: #e6d6fa; color: #211a36; border-color: #e6d6fa; font-weight: 650; }
+  button:focus-visible { outline: 2px solid #f5f3fc; outline-offset: 3px; }
+  section { margin-top: 1.3rem; padding-top: 1.15rem; border-top: 1px solid #665978; }
+  section p { margin: .45rem 0 .75rem; color: #ded2ed; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Lookout Rover</h1><p>Rover camera</p></header>
+  <div class="preview"><video id="camera" autoplay muted playsinline></video></div>
+  <p id="connection" role="status">Scan the pairing QR code from the Lookout Rover console.</p>
+  <div class="actions">
+    <button id="start" class="primary" type="button" hidden>Start rear camera</button>
+    <button id="disconnect" type="button" hidden>Disconnect phone</button>
+  </div>
+  <section aria-labelledby="intercom-label">
+    <h2 id="intercom-label">Intercom</h2>
+    <p id="intercom-state" role="status">Phone mic off</p>
+    <div class="actions">
+      <button id="accept" class="primary" type="button" hidden>Accept intercom</button>
+      <button id="end" type="button" hidden>End intercom</button>
+      <button id="play" type="button" hidden>Enable speaker</button>
+    </div>
+    <audio id="audio" autoplay playsinline></audio>
+  </section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
+<script src="phone-link.js?v=1"></script>
+<script>
+  const byId = id => document.getElementById(id);
+  const params = new URLSearchParams(location.hash.slice(1));
+  const id = params.get("id");
+  const token = params.get("key");
+  const valid = /^[a-z0-9-]{8,100}$/i.test(id || "") && /^[a-f0-9-]{36}$/i.test(token || "");
+
+  function render(link) {
+    byId("connection").textContent = link.status;
+    byId("start").hidden = !valid || !!(link.peer || link.starting);
+    byId("disconnect").hidden = !(link.peer || link.starting);
+    byId("accept").hidden = link.intercom !== "incoming";
+    byId("end").hidden = link.intercom === "off";
+    byId("end").textContent = link.intercom === "incoming" ? "Decline" : "End intercom";
+    byId("play").hidden = !link.audioBlocked;
+    byId("intercom-state").textContent = {
+      off: link.intercomNote || "Phone mic off",
+      incoming: "The operator is calling. Accept to turn on your mic.",
+      authorizing: "Waiting for microphone permission…",
+      connecting: "Connecting audio…",
+      live: "Intercom on · mic active",
+    }[link.intercom];
+  }
+  if (typeof window.RoverPhoneLink === "function") {
+    const link = new window.RoverPhoneLink({
+      role: "phone", video: byId("camera"), audio: byId("audio"), onChange: render,
+    });
+    if (!valid) link.status = "Scan the pairing QR code from the Lookout Rover console.";
+    byId("start").addEventListener("click", () => void link.start({id, token}));
+    byId("disconnect").addEventListener("click", () => link.close());
+    byId("accept").addEventListener("click", () => void link.startIntercom());
+    byId("end").addEventListener("click", () => link.endIntercom());
+    byId("play").addEventListener("click", () => void link.playAudio());
+    window.addEventListener("pagehide", () => link.close());
+    render(link);
+  } else {
+    byId("connection").textContent = "Phone service could not load. Refresh the page.";
+  }
+</script>
+</body>
+</html>
