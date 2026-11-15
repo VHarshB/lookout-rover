@@ -15,16 +15,14 @@
 
 const CONFIG = {
   name: "Hoot",
-  maxAngle: 55,        // matches MAX_YAW / MAX_TARGET
-  sound: false,        // start muted; press M or the voice button to enable
-  audioBase: null,     // e.g. "voice" → plays voice/<lineId>.mp3 made with Amazon Polly
-  fps: 30,             // capped so face tracking keeps the CPU
-  dozeAfter: 30000,    // ms of no driving before Hoot dozes off
+  maxAngle: 55,        
+  sound: false,       
+  audioBase: null,     
+  fps: 30,             
+  dozeAfter: 30000,    
 };
 
-// Spoken lines. They never contain the voice commands (stop, halt, brake, freeze,
-// resume, center, forward, reverse, back, left, right, go, turn, ahead, straight, roll), so the
-// mic can't mistake Hoot for the driver. Captions may show command words.
+
 const LINES = {
   hello:    {say: "Hi, I'm Hoot! I'll keep watch."},
   wake:     {say: "Camera on. Let me see you."},
@@ -74,8 +72,7 @@ const MOODS = {
 };
 const ACTIVE = new Set(["happy", "turning", "driving", "reversing", "startled", "confused", "stuck", "worried", "holding", "focus"]);
 
-// Page/firmware state text → mood. Matches index.html render() and the
-// XRP firmware reasons (OBSTACLE, NO_ECHO, COMMAND_LOST, WHEELS_STALLED, POWER_OFF).
+
 function moodFor(text) {
   const s = (text || "").toLowerCase();
   if (!s || s.includes("usb disconnected") || s.includes("connect the red board")) return "sleep";
@@ -101,7 +98,7 @@ function moodFor(text) {
 const parseDeg = t => {
   if (!t || !/\d/.test(t)) return null;
   const n = parseFloat(t);
-  return /right/i.test(t) ? -n : n;      // page shows "12° left" for +12
+  return /right/i.test(t) ? -n : n;      
 };
 const parseDist = t => {
   if (!t || t === "—") return undefined;
@@ -185,12 +182,13 @@ const CSS = `
 
 // Eye centres and radius (viewBox 0 0 320 340).
 const L = {x: 116, y: 150}, R = {x: 204, y: 150}, ER = 36;
-const DISC = "#3d4867";
+const DISC = "#cdb8f4";         
+const GOLD = "#ecc66a";          
 
 const eyeSVG = (side, c) => `
   <g class="lk-eye${side}">
     <g clip-path="url(#lkClip${side})">
-      <circle cx="${c.x}" cy="${c.y}" r="${ER}" fill="#121828"/>
+      <circle cx="${c.x}" cy="${c.y}" r="${ER}" fill="#1b1436"/>
       <g class="lk-look${side}">
         <circle cx="${c.x}" cy="${c.y}" r="31" fill="url(#lkIris)"/>
         <circle class="lk-pup${side}" cx="${c.x}" cy="${c.y}" r="13" fill="#120d06"/>
@@ -200,18 +198,18 @@ const eyeSVG = (side, c) => `
       <rect class="lk-lid${side}" x="${c.x - 64}" y="${c.y - ER - 90}" width="128" height="90" fill="${DISC}"/>
       <ellipse class="lk-low${side}" cx="${c.x}" cy="${c.y + 82}" rx="52" ry="44" fill="${DISC}"/>
     </g>
-    <circle cx="${c.x}" cy="${c.y}" r="${ER}" fill="none" stroke="#1d2438" stroke-width="4"/>
-    <path class="lk-shut" d="M${c.x - 22} ${c.y + 2} q22 14 44 0" fill="none" stroke="#141a2a" stroke-width="5" stroke-linecap="round" opacity="0"/>
+    <circle cx="${c.x}" cy="${c.y}" r="${ER}" fill="none" stroke="${GOLD}" stroke-width="2.2"/>
+    <path class="lk-shut" d="M${c.x - 22} ${c.y + 2} q22 14 44 0" fill="none" stroke="#4b2a7a" stroke-width="5" stroke-linecap="round" opacity="0"/>
   </g>`;
 
 const wheelSVG = (x) => `
   <g>
-    <circle cx="${x}" cy="312" r="21" fill="#171c2b" stroke="#4b5675" stroke-width="4"/>
+    <circle cx="${x}" cy="312" r="21" fill="#1d1638" stroke="${GOLD}" stroke-width="1.6"/>
     <g class="lk-spokes" data-x="${x}">
-      <line x1="${x}" y1="296" x2="${x}" y2="328" stroke="#6c7aa0" stroke-width="3" stroke-linecap="round"/>
-      <line x1="${x - 16}" y1="312" x2="${x + 16}" y2="312" stroke="#6c7aa0" stroke-width="3" stroke-linecap="round"/>
+      <line x1="${x}" y1="296" x2="${x}" y2="328" stroke="#cdb8f4" stroke-width="3" stroke-linecap="round"/>
+      <line x1="${x - 16}" y1="312" x2="${x + 16}" y2="312" stroke="#cdb8f4" stroke-width="3" stroke-linecap="round"/>
     </g>
-    <circle cx="${x}" cy="312" r="5" fill="#9aa7c7"/>
+    <circle cx="${x}" cy="312" r="5" fill="${GOLD}"/>
   </g>`;
 
 const chevrons = () => {
@@ -219,7 +217,7 @@ const chevrons = () => {
   for (const [y, xs] of [[236, [136, 160, 184]], [256, [124, 148, 172, 196]], [276, [136, 160, 184]]]) {
     for (const x of xs) d += `M${x - 7} ${y}q7 7 14 0`;
   }
-  return `<path d="${d}" fill="none" stroke="#7b88ad" stroke-width="2.4" stroke-linecap="round" opacity=".55"/>`;
+  return `<path d="${d}" fill="none" stroke="#ff8a3d" stroke-width="2.6" stroke-linecap="round"/>`;
 };
 
 const SVG = `
@@ -235,7 +233,13 @@ const SVG = `
       <stop class="lk-haloB" offset="100%" stop-color="#ffb547" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="lkBody" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#3a4566"/><stop offset="100%" stop-color="#262e47"/>
+      <stop offset="0%" stop-color="#7fdcf0"/><stop offset="45%" stop-color="#2f9ed3"/><stop offset="100%" stop-color="#2463aa"/>
+    </linearGradient>
+    <linearGradient id="lkWing" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#cdb8f4"/><stop offset="70%" stop-color="#d7263d"/><stop offset="100%" stop-color="#ff7eb6"/>
+    </linearGradient>
+    <linearGradient id="lkTuft" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff7eb6"/><stop offset="30%" stop-color="#ff8a3d"/><stop offset="100%" stop-color="#d7263d"/>
     </linearGradient>
     <clipPath id="lkClipL"><circle cx="${L.x}" cy="${L.y}" r="${ER}"/></clipPath>
     <clipPath id="lkClipR"><circle cx="${R.x}" cy="${R.y}" r="${ER}"/></clipPath>
@@ -243,26 +247,26 @@ const SVG = `
   <ellipse cx="160" cy="333" rx="96" ry="8" fill="#000" opacity=".35"/>
   <g class="lk-all">
     <g class="lk-wheels">${wheelSVG(108)}${wheelSVG(212)}</g>
-    <g class="lk-wingL"><ellipse cx="58" cy="232" rx="25" ry="58" fill="#232b44" stroke="#1a2035" stroke-width="3"/></g>
-    <g class="lk-wingR"><ellipse cx="262" cy="232" rx="25" ry="58" fill="#232b44" stroke="#1a2035" stroke-width="3"/></g>
-    <g class="lk-tuftL"><path d="M66 132 L72 50 L130 104 Z" fill="#2f3854" stroke="#1a2035" stroke-width="3" stroke-linejoin="round"/>
+    <g class="lk-wingL"><ellipse cx="58" cy="232" rx="25" ry="58" fill="url(#lkWing)" stroke="${GOLD}" stroke-width="1.6"/></g>
+    <g class="lk-wingR"><ellipse cx="262" cy="232" rx="25" ry="58" fill="url(#lkWing)" stroke="${GOLD}" stroke-width="1.6"/></g>
+    <g class="lk-tuftL"><path d="M66 132 L72 50 L130 104 Z" fill="url(#lkTuft)" stroke="${GOLD}" stroke-width="1.6" stroke-linejoin="round"/>
       <circle class="lk-led lk-ledL" cx="73" cy="54" r="7" fill="#ffb547"/></g>
-    <g class="lk-tuftR"><path d="M254 132 L248 50 L190 104 Z" fill="#2f3854" stroke="#1a2035" stroke-width="3" stroke-linejoin="round"/>
+    <g class="lk-tuftR"><path d="M254 132 L248 50 L190 104 Z" fill="url(#lkTuft)" stroke="${GOLD}" stroke-width="1.6" stroke-linejoin="round"/>
       <circle class="lk-led lk-ledR" cx="247" cy="54" r="7" fill="#ffb547"/></g>
-    <ellipse cx="160" cy="205" rx="112" ry="116" fill="url(#lkBody)" stroke="#1a2035" stroke-width="4"/>
-    <ellipse cx="160" cy="258" rx="66" ry="50" fill="#465273" opacity=".85"/>
+    <ellipse cx="160" cy="205" rx="112" ry="116" fill="url(#lkBody)" stroke="${GOLD}" stroke-width="2"/>
+    <ellipse cx="160" cy="258" rx="66" ry="50" fill="#fff1bd" stroke="${GOLD}" stroke-width="1.6"/>
     ${chevrons()}
     <g class="lk-head">
       <circle class="lk-halo" cx="160" cy="150" r="118" fill="url(#lkHalo)"/>
-      <circle cx="${L.x}" cy="${L.y}" r="55" fill="#56638a"/><circle cx="${R.x}" cy="${R.y}" r="55" fill="#56638a"/>
+      <circle cx="${L.x}" cy="${L.y}" r="52.8" fill="${GOLD}"/><circle cx="${R.x}" cy="${R.y}" r="52.8" fill="${GOLD}"/>
       <circle cx="${L.x}" cy="${L.y}" r="51" fill="${DISC}"/><circle cx="${R.x}" cy="${R.y}" r="51" fill="${DISC}"/>
       ${eyeSVG("L", L)}${eyeSVG("R", R)}
-      <line class="lk-browL" x1="${L.x - 30}" y1="${L.y - 52}" x2="${L.x + 26}" y2="${L.y - 48}" stroke="#cfd8f0" stroke-width="7" stroke-linecap="round"/>
-      <line class="lk-browR" x1="${R.x + 30}" y1="${R.y - 52}" x2="${R.x - 26}" y2="${R.y - 48}" stroke="#cfd8f0" stroke-width="7" stroke-linecap="round"/>
-      <ellipse class="lk-blush" cx="88" cy="200" rx="15" ry="7" fill="#ff8fa3" opacity="0"/>
-      <ellipse class="lk-blush" cx="232" cy="200" rx="15" ry="7" fill="#ff8fa3" opacity="0"/>
-      <path class="lk-beakLo" d="M150 189 L170 189 L160 205 Z" fill="#d9a54a" stroke="#8a5f1c" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M147 189 L160 171 L173 189 Z" fill="#f2c46d" stroke="#8a5f1c" stroke-width="2" stroke-linejoin="round"/>
+      <line class="lk-browL" x1="${L.x - 30}" y1="${L.y - 52}" x2="${L.x + 26}" y2="${L.y - 48}" stroke="#5b2a86" stroke-width="7" stroke-linecap="round"/>
+      <line class="lk-browR" x1="${R.x + 30}" y1="${R.y - 52}" x2="${R.x - 26}" y2="${R.y - 48}" stroke="#5b2a86" stroke-width="7" stroke-linecap="round"/>
+      <ellipse class="lk-blush" cx="88" cy="200" rx="15" ry="7" fill="#ff7eb6" opacity="0"/>
+      <ellipse class="lk-blush" cx="232" cy="200" rx="15" ry="7" fill="#ff7eb6" opacity="0"/>
+      <path class="lk-beakLo" d="M150 189 L170 189 L160 205 Z" fill="#f6a12a" stroke="#b8862b" stroke-width="1.6" stroke-linejoin="round"/>
+      <path d="M147 189 L160 171 L173 189 Z" fill="#ffd84f" stroke="#b8862b" stroke-width="1.6" stroke-linejoin="round"/>
     </g>
   </g>
   <g class="lk-fx">
@@ -363,10 +367,10 @@ class Mascot {
     requestAnimationFrame(this._frame);
   }
 
-  // ---------- public API ----------
+  
   setReason(text) {
     const mood = moodFor(text);
-    // Pulling the USB cable mid-drive: say what the firmware did, then sleep.
+   
     if (mood === "sleep" && ACTIVE.has(this.mood)) {
       this.override = {until: performance.now() + 3500};
       this.setMood("worried", false, "unplugged");
@@ -392,21 +396,21 @@ class Mascot {
       if (this._refHead == null || Math.abs(deg - this._refHead) > 3) this._refHead = deg;
     }
   }
-  // Tap/click Hoot: giggle and wiggle; every 3rd tap he spins his head like a real owl.
+  
   poke() {
     const now = performance.now();
-    if (this.markActive()) return;            // a tap wakes a dozing Hoot
-    if (now < this.pokeUntil - 350) return;   // ignore rapid double taps
+    if (this.markActive()) return;            
+    if (now < this.pokeUntil - 350) return;   
     this.pokes++;
     this.pokeAt = now; this.pokeUntil = now + 1100;
-    if (this.stage) return;                   // stage view animates silently
+    if (this.stage) return;                   
     const spin = this.pokes % 3 === 0;
     if (spin) this.spinAt = now + 250;
     this.chirp(spin ? "hoo" : "giggle");
     this.tickles = (this.tickles || 0) + (spin ? 0 : 1);
     this.say(spin ? "tickle3" : ["tickle1", "tickle2", "tickle4"][(this.tickles - 1) % 3]);
   }
-  // Any driving activity resets the doze timer and wakes a dozing Hoot.
+  
   markActive() {
     this.lastActive = performance.now();
     if (!this.drowsy) return false;
@@ -427,7 +431,7 @@ class Mascot {
     this.chirp("yawn");
     this.say("yawn");
   }
-  setDistance(cm) {        // number, null = no echo, undefined = unknown
+  setDistance(cm) {        
     this.distance = cm;
     const m = this.el.meter;
     if (cm === undefined) { this.el.dist.textContent = "—"; m.style.width = "0"; return; }
@@ -436,7 +440,7 @@ class Mascot {
     m.style.width = clamp(cm / 120, .04, 1) * 100 + "%";
     m.style.background = cm < 20 ? "#ff5a4a" : cm < 45 ? "#ffb547" : "#5fd38d";
   }
-  heard(text) {            // a voice command was recognised
+  heard(text) {           
     if (!text) return;
     if (this.markActive()) return;
     this.nodUntil = performance.now() + 420;
@@ -468,7 +472,7 @@ class Mascot {
       if ("speechSynthesis" in window) speechSynthesis.resume();
       return;
     }
-    // Invalidate async playback/error callbacks before stopping active sound.
+   
     this.audioGeneration++;
     this.speaking = false;
     if ("speechSynthesis" in window) speechSynthesis.cancel();
@@ -484,7 +488,7 @@ class Mascot {
     this.tones.clear();
   }
 
-  // ---------- mood ----------
+  
   setMood(name, silent = false, lineOverride = null) {
     const m = MOODS[name] || MOODS.idle;
     const now = performance.now();
@@ -504,7 +508,7 @@ class Mascot {
 
     if (name === "sleep") { this.readySaid = false; }
     if (name === "idle" && prev === "sleep" && !this.greeted) { this.greeted = true; this.chirp("hoo"); this.say("hello"); return; }
-    // A face shows up after being away: say hi (at most every 8 s).
+    
     if (FACE_MOODS.has(name) && (prev === "search" || prev === "waking") && now - this.lastGreet > 8000) {
       if (name === "focus") { this.lastGreet = now; this.chirp("hoo"); this.say("hiFocus"); return; }
       if (!m.line) { this.lastGreet = now; this.chirp("hoo"); this.say("hi"); return; }
@@ -523,7 +527,7 @@ class Mascot {
     this.say(lineId);
   }
 
-  // ---------- bubble + voice ----------
+ 
   showBubble(text, ms) {
     this.el.bubble.textContent = text;
     this.el.bubble.classList.add("show");
@@ -535,7 +539,7 @@ class Mascot {
   speak(text, id) {
     if (!this.sound) return;
     const now = performance.now();
-    if (now - this.lastSpeakAt < 1200 && this.speaking) return;   // don't pile up lines
+    if (now - this.lastSpeakAt < 1200 && this.speaking) return;   
     this.lastSpeakAt = now;
     const generation = this.audioGeneration;
     const canPlay = () => this.sound && this.audioGeneration === generation;
@@ -592,7 +596,7 @@ class Mascot {
     }
   }
 
-  // ---------- animation ----------
+
   _frame(now) {
     requestAnimationFrame(this._frame);
     if (now - this._last < 1000 / this.opts.fps - 1) return;
@@ -616,7 +620,7 @@ class Mascot {
       eye += near * .1; pupil *= 1 - near * .3;
     }
 
-    // Gaze: driver look when known, otherwise wander.
+    
     if (now > this.gaze.next) {
       this.gaze.tx = (Math.random() * 2 - 1) * c.wander;
       this.gaze.ty = (Math.random() * 2 - 1) * c.wander * .6;
@@ -628,14 +632,14 @@ class Mascot {
     this.gaze.y += (wantY - this.gaze.y) * Math.min(1, k * 1.6);
     this.turn += (this.turnT - this.turn) * k;
 
-    // Blink.
+    
     if (now > this.blinkAt) {
       this.blinkUntil = now + 170;
       this.blinkAt = now + 2200 + Math.random() * 3800 + (Math.random() < .2 ? -1900 : 0);
     }
     const blink = now < this.blinkUntil ? 1 - Math.abs((this.blinkUntil - now) / 85 - 1) : 0;
 
-    // Overlays: doze, yawn, tickle, owl head spin.
+   
     if (!this.stage && !this.drowsy && (this.mood === "idle" || this.mood === "happy") &&
         now - this.lastActive > this.opts.dozeAfter) this.doze();
     let lidTop = c.lidTop, lidBottom = c.lidBottom, blush = c.blush, tilt = c.tilt, wing = c.wing, yawn = 0, spinDeg = 0;
