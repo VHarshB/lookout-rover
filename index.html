@@ -417,16 +417,15 @@ summary { cursor: pointer; width: fit-content; }
 
     async writeBluetooth(session, bytes, closingStop = false) {
       // Conservative packet size avoids assuming a negotiated MTU. One write at a time.
-      const acknowledge = closingStop || new TextDecoder().decode(bytes).includes("STOP");
+      // Use the same acknowledged GATT write as the startup handshake. This
+      // applies backpressure before the next motion frame can be dispatched.
       for (let offset = 0; offset < bytes.length; offset += 20) {
         if ((session.closing && !closingStop) || !session.device.gatt.connected) {
           throw new Error("Bluetooth disconnected");
         }
-        const fast = this.ready && !acknowledge && session.transmit.properties?.writeWithoutResponse
-          && typeof session.transmit.writeValueWithoutResponse === "function";
         const chunk = bytes.subarray(offset, offset + 20);
         await this.withTimeout(
-          fast ? session.transmit.writeValueWithoutResponse(chunk) : session.transmit.writeValueWithResponse(chunk),
+          session.transmit.writeValueWithResponse(chunk),
           450, "Bluetooth write timed out",
         );
       }
@@ -558,8 +557,10 @@ summary { cursor: pointer; width: fit-content; }
       }
       if (command) {
         void this.write(session, command).catch(error => {
+          if (session.closing || this.session !== session) return;
           steeringTrace.write = command.trim() + " - failed: " + error.message;
-          void this.close(session, session.label + " connection was lost.");
+          const detail = session.device ? " · " + error.message : "";
+          void this.close(session, session.label + " connection was lost" + detail + ".");
         });
       }
     }
@@ -574,8 +575,11 @@ summary { cursor: pointer; width: fit-content; }
         const {device, receive, onBytes, onDisconnect} = session;
         if (receive && onBytes) receive.removeEventListener("characteristicvaluechanged", onBytes);
         if (onDisconnect) device.removeEventListener("gattserverdisconnected", onDisconnect);
-        if (wasReady && session.pending === 0 && device.gatt.connected) {
-          try { await this.writeBluetooth(session, new TextEncoder().encode("STOP\r"), true); } catch (_) {}
+        if (wasReady && device.gatt.connected) {
+          // Closing rejects queued motion. Finish the active write before
+          // stopping, and invalidate any partial command in the board parser.
+          await session.queue.catch(() => {});
+          try { await this.writeBluetooth(session, new TextEncoder().encode(" !\rSTOP\r"), true); } catch (_) {}
         }
         device.gatt.disconnect();
       }
@@ -802,10 +806,13 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function step(now = performance.now(), voiceUpdate = false) {
+    const bluetooth = socket.session?.transport === "bluetooth";
+    const minAimInterval = bluetooth ? 32 : 16;
+    const aimHeartbeat = bluetooth ? 100 : 80;
     // Fresh movement gets the next free BLE slot. Once a poll is 250 ms due,
     // reserve the next free slot for telemetry; stale-data limits stay unchanged.
     if (!voiceUpdate && socket.ready && now - lastPoll >= 165 && socket.bufferedAmount === 0
-        && (!canMove(now) || now - lastPoll >= 250 || now - lastMotionAt < 16)) {
+        && (!canMove(now) || now - lastPoll >= 250 || now - lastMotionAt < minAimInterval)) {
       send("status");
       lastPoll = now;
     }
@@ -857,7 +864,7 @@ summary { cursor: pointer; width: fit-content; }
     const rate = steeringRate(now, angle, latestStatus.heading);
     const packet = angle.toFixed(1) + " " + base.toFixed(2) + " " + rate;
     if (socket.bufferedAmount === 0 && (
-      voiceUpdate || now - lastMotionAt >= 80 || (packet !== lastMotion && now - lastMotionAt >= 16)
+      voiceUpdate || now - lastMotionAt >= aimHeartbeat || (packet !== lastMotion && now - lastMotionAt >= minAimInterval)
     )) {
       send("aim", {angle, base, rate});
       lastMotionAt = now;
