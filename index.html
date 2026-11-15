@@ -41,11 +41,6 @@
   #state { color: #f1f6f3; font-size: 1.08rem; font-weight: 650; min-height: 1.5em; }
   #voice-state { font-size: .85rem; }
   #heard { overflow-wrap: anywhere; }
-  .voice-setup { margin-top: .85rem; font-size: .87rem; }
-  .voice-setup summary { cursor: pointer; }
-  .voice-setup label { display: grid; gap: .3rem; margin-top: .6rem; }
-  .voice-setup input { box-sizing: border-box; width: 100%; padding: .45rem;
-    font: inherit; border: 1px solid #507160; border-radius: .35rem; background: #101815; }
   @media (max-width: 700px) { main { margin-top: 1rem; } .layout { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -77,15 +72,6 @@
       <p id="heard" class="help">Heard: —</p>
       <p id="voice-command" class="help" role="status"></p>
       <p class="help">For the quickest response, say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop. Say “resume” to drive again.</p>
-      <details class="voice-setup">
-        <summary>Gemini voice setup</summary>
-        <label>Worker URL
-          <input id="voice-worker" type="url" placeholder="https://lookout-voice.example.workers.dev" autocomplete="off" spellcheck="false">
-        </label>
-        <label>Demo token
-          <input id="voice-token" type="password" autocomplete="off">
-        </label>
-      </details>
     </section>
   </div>
 </main>
@@ -274,11 +260,11 @@
   const usbButton = byId("usb");
   const enableButton = byId("enable");
   const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const LOCAL_SPEECH_PACK = {langs: ["en-US"], processLocally: true, quality: "command"};
   const MAX_YAW = 55;
   const MAX_RATE = 180;
   const FACE_TIMEOUT = 240;
   const VOICE_DURATION = 1600;
-  const QUICK_VOICE_HOLD = 120;
   const QUICK_VOICE_CONFIRM = 1100;
   const TRACK_MS = 33;
   const MEDIAPIPE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
@@ -290,13 +276,13 @@
   let hidden = document.hidden;
   let stream, tracker, recognition, restartSpeech;
   let trackingError = "", voiceLabel = "Mic off";
+  let voicePackInstalling = false;
   let face, previousFrame = -1, lastSample = 0, calibration = [], neutral = null;
   let filteredYaw = 0, faceAngle = 0, faceRate = 0, lastControlPose = 0, yawOffset = 0;
   let latestStatus = null, lastPoll = 0, lastMotionAt = 0, lastMotion = "";
   let started = false, zeroAt = null, zeroAttempts = 0, voiceStop = false, translation = null;
   let motionBlock = null;
-  let voiceRequest = null;
-  let voiceDraft = null, ignoredVoiceIndex = -1, lastFinalVoiceIndex = -1;
+  let voiceDraft = null, ignoredVoiceIndex = -1, lastFinalVoiceIndex = -1, lastInterimVoiceIndex = -1;
 
   const clamp = (n, max) => Math.max(-max, Math.min(max, n));
   const angleDelta = a => ((a + 180) % 360 + 360) % 360 - 180;
@@ -331,7 +317,8 @@
     enableButton.textContent = enabled ? "Disable steering" : "Enable steering";
     enableButton.setAttribute("aria-pressed", String(enabled));
     enableButton.disabled = !enabled && !socket.ready;
-    byId("voice-state").textContent = voiceLabel;
+    const micStatus = voiceLabel + (voicePackInstalling ? " · downloading English voice pack" : "");
+    if (byId("voice-state").textContent !== micStatus) byId("voice-state").textContent = micStatus;
 
     const now = performance.now();
     const report = latestStatus && now - latestStatus.at < 650 ? latestStatus : null;
@@ -365,14 +352,13 @@
     if (byId("state").textContent !== reason) byId("state").textContent = reason;
   }
 
-  function step(now = performance.now()) {
-    if (socket.ready && now - lastPoll >= 165 && socket.bufferedAmount === 0) {
+  function step(now = performance.now(), voiceUpdate = false) {
+    if (!voiceUpdate && socket.ready && now - lastPoll >= 165 && socket.bufferedAmount === 0) {
       send("status");
       lastPoll = now;
     }
     if (!enabled || voiceStop || hidden || !socket.ready || !liveFace(now)) {
       discardVoiceDraft();
-      cancelVoiceRequest();
       if (enabled) stopMotion();
       render();
       return;
@@ -392,7 +378,6 @@
     }
     if (!latestStatus || now - latestStatus.at > 650) {
       discardVoiceDraft();
-      cancelVoiceRequest();
       stopMotion();
       render();
       return;
@@ -415,7 +400,7 @@
     const rate = now - lastControlPose < 110 ? Math.round(clamp(faceRate, MAX_RATE)) : 0;
     const packet = angle.toFixed(1) + " " + base.toFixed(2) + " " + rate;
     if (socket.bufferedAmount === 0 && (
-      now - lastMotionAt >= 115 || (packet !== lastMotion && now - lastMotionAt >= 31)
+      voiceUpdate || now - lastMotionAt >= 115 || (packet !== lastMotion && now - lastMotionAt >= 31)
     )) {
       send("aim", {angle, base, rate});
       lastMotionAt = now;
@@ -618,24 +603,19 @@
     ["resume", "resume"], ["resume steering", "resume"], ["center", "recenter"], ["recenter", "recenter"],
   ]);
   const roverPrefix = /^(?:(?:hey|okay|ok|please)[\s,]+)?rover\b[\s,.:;!?-]*/i;
-  const quickVoicePhrases = new Set(["forward", "reverse", "left", "right", "go forward", "back up", "turn left", "turn right"]);
-  const geminiCommands = new Set(["forward", "reverse", "left", "right", "stop", "none"]);
+  const quickVoicePhrases = new Set([
+    "forward", "reverse", "left", "right", "go forward", "go back", "back up", "turn left", "turn right",
+  ]);
+  const speechHints = ["rover forward", "rover reverse", "rover left", "rover right",
+    "go forward", "back up", "turn left", "turn right", "stop", "resume", "recenter"];
 
   function voiceFeedback(text) {
     byId("voice-command").textContent = text;
   }
 
-  function cancelVoiceRequest() {
-    if (!voiceRequest) return;
-    const request = voiceRequest;
-    voiceRequest = null;
-    request.abort();
-    voiceFeedback("Gemini request canceled");
-  }
-
   function latchStop() {
     discardVoiceDraft();
-    cancelVoiceRequest();
+    if (lastInterimVoiceIndex > lastFinalVoiceIndex) ignoredVoiceIndex = lastInterimVoiceIndex;
     voiceStop = true;
     motionBlock = null;
     stopMotion();
@@ -672,87 +652,13 @@
       }
     }
     voiceFeedback("Command: " + command + " · " + source);
-    step();
+    step(performance.now(), true);
     return true;
-  }
-
-  async function classifyTranscript(text) {
-    const address = byId("voice-worker").value.trim();
-    const token = byId("voice-token").value.trim();
-    if (!address || !token) {
-      voiceFeedback("Add the Worker URL and demo token in Gemini voice setup");
-      return;
-    }
-    let endpoint;
-    try {
-      endpoint = new URL(address);
-      if (endpoint.protocol !== "https:" || !endpoint.hostname.endsWith(".workers.dev")
-          || endpoint.username || endpoint.password || endpoint.port || endpoint.search || endpoint.hash
-          || !["/", "/voice", "/voice/"].includes(endpoint.pathname)) throw new Error();
-      endpoint.pathname = "/voice";
-    } catch (_) {
-      voiceFeedback("Enter the HTTPS workers.dev URL");
-      return;
-    }
-    if (text.length > 240) {
-      voiceFeedback("Use one short rover command");
-      return;
-    }
-    if (!canMove(performance.now())) {
-      voiceFeedback(voiceStop ? "Say “resume” before moving" : "Wait for steering to be ready");
-      return;
-    }
-    const request = new AbortController();
-    voiceRequest = request;
-    const deadline = performance.now() + 2600;
-    const timer = setTimeout(() => request.abort(), 2600);
-    voiceFeedback("Gemini is interpreting the phrase…");
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        redirect: "error",
-        headers: {"Content-Type": "application/json", Authorization: "Bearer " + token},
-        body: JSON.stringify({text}),
-        signal: request.signal,
-      });
-      if (voiceRequest !== request) return;
-      if (!response.ok) {
-        const issue = {
-          401: "Gemini demo token does not match",
-          429: "Gemini quota or rate limit reached",
-          502: "Gemini request failed · check Worker logs",
-          503: "Add the two Worker secrets and deploy",
-          504: "Gemini timed out · say the command again",
-        };
-        voiceFeedback(issue[response.status] || "Gemini HTTP " + response.status);
-        return;
-      }
-      const {command} = await response.json();
-      if (voiceRequest !== request) return;
-      voiceRequest = null;
-      if (performance.now() > deadline) {
-        voiceFeedback("Gemini timed out · say the command again");
-      } else if (!geminiCommands.has(command) || command === "none") {
-        voiceFeedback("No clear rover command");
-      } else if (canMove(performance.now())) {
-        applyVoiceCommand(command, "Gemini");
-      } else {
-        voiceFeedback("Command expired · wait for steering to be ready");
-      }
-    } catch (_) {
-      if (voiceRequest === request) {
-        voiceFeedback(request.signal.aborted ? "Gemini timed out · say the command again" : "Gemini Worker unreachable");
-      }
-    } finally {
-      clearTimeout(timer);
-      if (voiceRequest === request) voiceRequest = null;
-    }
   }
 
   function takeVoiceDraft() {
     const draft = voiceDraft;
     if (!draft) return null;
-    clearTimeout(draft.startTimer);
     clearTimeout(draft.confirmTimer);
     voiceDraft = null;
     return draft;
@@ -767,21 +673,17 @@
     if (message) voiceFeedback(message);
   }
 
-  function queueQuickVoice(index, command) {
+  function previewVoice(index, command, source) {
     if (voiceDraft || ignoredVoiceIndex === index || !canMove(performance.now())) return;
     const draft = {index, command, applied: false, previousYaw: yawOffset};
     voiceDraft = draft;
-    draft.startTimer = setTimeout(() => {
-      if (voiceDraft !== draft || !canMove(performance.now())) return;
-      draft.previousYaw = yawOffset;
-      draft.applied = applyVoiceCommand(command, "Quick voice");
-    }, QUICK_VOICE_HOLD);
+    draft.applied = applyVoiceCommand(command, source);
     draft.confirmTimer = setTimeout(() => {
       if (voiceDraft === draft) discardVoiceDraft("Voice was unclear · repeat the command");
     }, QUICK_VOICE_CONFIRM);
   }
 
-  function spoken(event) {
+  function spoken(event, source) {
     if (!enabled || hidden) return;
     if (voiceDraft && voiceDraft.index >= event.results.length) {
       discardVoiceDraft("Voice was unclear · repeat the command");
@@ -790,7 +692,12 @@
       if (i <= lastFinalVoiceIndex) continue;
       const item = event.results[i];
       const transcript = item[0]?.transcript.trim() ?? "";
-      if (item.isFinal) lastFinalVoiceIndex = i;
+      if (item.isFinal) {
+        lastFinalVoiceIndex = i;
+        if (lastInterimVoiceIndex <= i) lastInterimVoiceIndex = -1;
+      } else {
+        lastInterimVoiceIndex = i;
+      }
       if (transcript) byId("heard").textContent = "Heard: " + transcript;
       const normalized = transcript.toLowerCase().replace(/[’']/g, "").replace(/[^a-z]+/g, " ").trim();
       const addressed = roverPrefix.test(normalized);
@@ -799,71 +706,109 @@
       const phrase = spokenCommand.replace(politePrefix, "").replace(/ (?:please|now)$/, "");
       const stop = /^(?:stop|halt|brake|freeze)(?: (?:moving|the rover|rover))?$/.test(phrase);
       if (stop) {
-        applyVoiceCommand("stop", "Chrome");
+        applyVoiceCommand("stop", source);
         ignoredVoiceIndex = i;
         return;
       }
-      cancelVoiceRequest();
       const command = localVoiceCommands.get(phrase) ??
         localVoiceCommands.get(phrase.replace(/ (?:a little|a bit)$/, ""));
       const quick = addressed && quickVoicePhrases.has(spokenCommand);
       if (voiceDraft) {
         if (voiceDraft.index !== i || voiceDraft.command !== command || (!item.isFinal && !quick)) {
           discardVoiceDraft("Phrase changed · repeat the command");
-        } else if (item.isFinal && takeVoiceDraft().applied) {
-          voiceFeedback("Command: " + command + " · Quick voice");
-          continue;
-        }
+        } else if (item.isFinal && takeVoiceDraft().applied) continue;
       }
       if (i === ignoredVoiceIndex || !transcript) continue;
       if (!item.isFinal) {
-        if (quick) queueQuickVoice(i, command);
+        if (quick) previewVoice(i, command, source);
         continue;
       }
       if (command) {
-        applyVoiceCommand(command, "Chrome");
-      } else if (/\b(?:dont|do not|never|not|unless)\b/.test(phrase)) {
-        voiceFeedback("No clear rover command");
-      } else if (addressed) {
-        const text = transcript.replace(roverPrefix, "").trim();
-        if (phrase && text) void classifyTranscript(text);
-      } else {
-        voiceFeedback("Say “Rover” before a natural-language command");
+        applyVoiceCommand(command, source);
+      } else if (addressed && phrase) {
+        voiceFeedback("Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right”");
       }
     }
   }
 
-  function startVoice(token) {
-    if (!Speech) {
-      voiceLabel = "Voice unavailable";
-      return;
+  function voiceEnabled(token) {
+    return enabled && generation === token;
+  }
+
+  function closeRecognition() {
+    clearTimeout(restartSpeech);
+    const active = recognition;
+    recognition = null;
+    if (active) {
+      active.onend = null;
+      try { active.abort(); } catch (_) {}
     }
+    return Boolean(active);
+  }
+
+  function switchRecognition(token, local, useHints = true) {
+    if (!voiceEnabled(token)) return;
+    discardVoiceDraft();
+    if (closeRecognition()) {
+      restartSpeech = setTimeout(() => openRecognition(token, local, useHints), 100);
+    } else {
+      openRecognition(token, local, useHints);
+    }
+  }
+
+  function openRecognition(token, local, useHints) {
+    if (!voiceEnabled(token)) return;
     const active = new Speech();
     recognition = active;
-    active.lang = "en-US";
+    const current = () => voiceEnabled(token) && recognition === active;
+    const source = local ? "On-device" : "Chrome speech";
+    active.lang = LOCAL_SPEECH_PACK.langs[0];
     active.continuous = true;
     active.interimResults = true;
-    active.onresult = event => {
-      if (generation === token && recognition === active) spoken(event);
+    if (local) {
+      active.processLocally = true;
+      if ("quality" in active) active.quality = LOCAL_SPEECH_PACK.quality;
+      if (useHints && "phrases" in active && typeof window.SpeechRecognitionPhrase === "function") {
+        try {
+          active.phrases = speechHints.map(phrase => new window.SpeechRecognitionPhrase(phrase, 3.0));
+        } catch (_) {}
+      }
+    }
+    let networkError = false;
+    const start = () => {
+      if (!current()) return;
+      try { active.start(); }
+      catch (_) {
+        if (local) switchRecognition(token, false);
+        else voiceLabel = "Mic unavailable · toggle steering to retry";
+      }
     };
-    active.onspeechstart = () => {
-      if (generation !== token) return;
-      discardVoiceDraft();
-      cancelVoiceRequest();
+    active.onresult = event => {
+      if (current()) spoken(event, source);
     };
     active.onstart = () => {
-      if (generation !== token) return;
-      lastFinalVoiceIndex = ignoredVoiceIndex = -1;
-      voiceLabel = "Listening";
+      if (!current()) return;
+      lastFinalVoiceIndex = lastInterimVoiceIndex = ignoredVoiceIndex = -1;
+      networkError = false;
+      voiceLabel = "Listening · " + source;
     };
     active.onnomatch = () => {
-      if (generation !== token) return;
+      if (!current()) return;
       discardVoiceDraft();
       voiceFeedback("Voice was unclear · repeat the command");
     };
     active.onerror = event => {
-      if (generation !== token || event.error === "aborted" || event.error === "no-speech") return;
+      if (!current() || event.error === "aborted" || event.error === "no-speech") return;
       discardVoiceDraft();
+      if (local && event.error === "phrases-not-supported" && useHints) {
+        switchRecognition(token, true, false);
+        return;
+      }
+      if (local && ["language-not-supported", "service-not-allowed", "network", "bad-grammar",
+                    "phrases-not-supported"].includes(event.error)) {
+        switchRecognition(token, false);
+        return;
+      }
       const errors = {
         "not-allowed": "Mic permission denied · allow microphone in Chrome",
         "audio-capture": "No microphone · check Windows input",
@@ -871,34 +816,49 @@
         "service-not-allowed": "Chrome speech service unavailable",
       };
       voiceLabel = errors[event.error] || "Voice unavailable · " + event.error;
-      if (event.error !== "network") active.onend = null;
+      networkError = event.error === "network";
+      if (!networkError) active.onend = null;
     };
     active.onend = () => {
-      if (!enabled || generation !== token) return;
+      if (!current()) return;
       discardVoiceDraft();
-      const networkError = voiceLabel === "Chrome speech network error";
       if (!networkError) voiceLabel = "Mic reconnecting";
-      restartSpeech = setTimeout(() => {
-        if (enabled && generation === token) {
-          try { active.start(); } catch (_) {}
-        }
-      }, networkError ? 1400 : 120);
+      restartSpeech = setTimeout(start, networkError ? 1400 : 100);
     };
-    try { active.start(); } catch (_) { voiceLabel = "Voice unavailable"; }
+    voiceLabel = "Starting mic";
+    start();
+  }
+
+  async function startVoice(token) {
+    if (!Speech) {
+      voiceLabel = "Voice unavailable in this browser";
+      return;
+    }
+    if (typeof Speech.available !== "function" || !("processLocally" in Speech.prototype)) {
+      openRecognition(token, false, false);
+      return;
+    }
+    voiceLabel = "Checking on-device voice";
+    let available;
+    try { available = await Speech.available(LOCAL_SPEECH_PACK); } catch (_) {}
+    if (!voiceEnabled(token)) return;
+    switchRecognition(token, available === "available");
+    if (!["downloadable", "downloading"].includes(available) || typeof Speech.install !== "function") return;
+    voicePackInstalling = true;
+    let installed = false;
+    try { installed = await Speech.install(LOCAL_SPEECH_PACK); } catch (_) {}
+    if (!voiceEnabled(token)) return;
+    voicePackInstalling = false;
+    if (installed) switchRecognition(token, true);
   }
 
   function disable() {
     enabled = false;
     generation++;
     discardVoiceDraft();
-    lastFinalVoiceIndex = ignoredVoiceIndex = -1;
-    cancelVoiceRequest();
-    clearTimeout(restartSpeech);
-    if (recognition) {
-      recognition.onend = null;
-      recognition.abort();
-      recognition = null;
-    }
+    lastFinalVoiceIndex = lastInterimVoiceIndex = ignoredVoiceIndex = -1;
+    voicePackInstalling = false;
+    closeRecognition();
     if (stream) stream.getTracks().forEach(track => track.stop());
     stream = null;
     if (tracker) tracker.close();
@@ -923,7 +883,7 @@
     voiceStop = false;
     trackingError = "";
     calibrate();
-    startVoice(token);
+    void startVoice(token);
     render();
     try {
       const camera = await navigator.mediaDevices.getUserMedia({
@@ -999,14 +959,12 @@
     hidden = document.hidden;
     if (hidden) {
       discardVoiceDraft();
-      cancelVoiceRequest();
       stopMotion();
     }
     render();
   });
   window.addEventListener("pagehide", () => {
     discardVoiceDraft();
-    cancelVoiceRequest();
     stopMotion();
   });
   document.addEventListener("keydown", event => {
