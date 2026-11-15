@@ -28,6 +28,7 @@
 
   function bookmark(value, base) {
     const url = new URL("rover-phone.html", base);
+    url.searchParams.set("v", "2");
     url.hash = new URLSearchParams({id: value.id, key: value.token}).toString();
     return url.href;
   }
@@ -39,7 +40,8 @@
     const password = value.token.replace(/-/g, "");
     url.searchParams.set(sender ? "push" : "view", streamID);
     url.searchParams.set("password", password);
-    url.searchParams.set("relay", "1");
+    // Prefer direct WebRTC; VDO.Ninja falls back to TURN automatically.
+    // Forcing relay-only prevented negotiation on otherwise working networks.
     if (sender) {
       url.searchParams.set("webcam", "1");
       url.searchParams.set("autostart", "1");

@@ -283,7 +283,7 @@ summary { cursor: pointer; width: fit-content; }
 </main>
 <aside id="mascot" aria-label="Hoot rover companion"></aside>
 <script defer src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-<script defer src="phone-video.js?v=1"></script>
+<script defer src="phone-video.js?v=2"></script>
 <script>
   // The XRP's Bluetooth REPL uses the Nordic UART service.
   const XRP_UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
@@ -1491,7 +1491,44 @@ summary { cursor: pointer; width: fit-content; }
       return;
     }
 
+    let statsTimer = null, waitingTimer = null, currentPairing = null;
+    let videoConnected = false;
+    const relayOrigin = "https://vdo.ninja";
+
+    function setVideoStatus(connected, message) {
+      videoConnected = connected;
+      const badge = connected ? "Phone video connected" : "Waiting for phone";
+      if (byId("phone-badge").textContent !== badge) byId("phone-badge").textContent = badge;
+      if (status.textContent !== message) status.textContent = message;
+      if (connected) clearTimeout(waitingTimer);
+    }
+    function requestVideoStats() {
+      if (currentPairing && frame.contentWindow) {
+        frame.contentWindow.postMessage({getStats: true}, relayOrigin);
+      }
+    }
+    frame.addEventListener("load", requestVideoStats);
+    window.addEventListener("message", event => {
+      if (!currentPairing || event.source !== frame.contentWindow || event.origin !== relayOrigin
+          || !event.data || typeof event.data !== "object") return;
+      if (event.data.action === "new-video-track-added") {
+        setVideoStatus(true, "Phone camera connected. Keep the sender page open on your phone.");
+      }
+      const stats = event.data.stats;
+      if (stats && typeof stats === "object" && stats.inbound && typeof stats.inbound === "object") {
+        const incoming = Object.values(stats.inbound).filter(value => value && typeof value === "object");
+        if (incoming.length) {
+          setVideoStatus(true, "Phone camera connected. Keep the sender page open on your phone.");
+        } else if (videoConnected) {
+          setVideoStatus(false, "Phone video disconnected. Reopen the saved phone link to reconnect.");
+        }
+      }
+    });
+
     function showViewer(value) {
+      currentPairing = value;
+      clearInterval(statsTimer);
+      clearTimeout(waitingTimer);
       const link = api.bookmark(value, location.href);
       const view = api.relayUrl(value, false);
       byId("phone-url").value = link;
@@ -1507,11 +1544,15 @@ summary { cursor: pointer; width: fit-content; }
       byId("phone-open-view").hidden = false;
       byId("phone-reload").hidden = false;
       byId("phone-camera-note").hidden = true;
-      byId("phone-badge").textContent = "Relay viewer";
+      setVideoStatus(false, "Open this phone link in Safari and allow the rear camera. Keep that page open.");
       frame.src = view;
       frame.hidden = false;
       pair.hidden = true;
-      status.textContent = "Open the saved phone link in Safari and keep the sender page open.";
+      statsTimer = setInterval(requestVideoStats, 2000);
+      waitingTimer = setTimeout(() => {
+        if (!videoConnected) setVideoStatus(false,
+          "No phone video received yet. Reopen the phone link below, allow camera access, then try Reload viewer. On a restricted network, try a phone hotspot.");
+      }, 20000);
     }
 
     pair.addEventListener("click", () => {
@@ -1526,7 +1567,14 @@ summary { cursor: pointer; width: fit-content; }
       } catch (_) { input.select(); }
     });
     byId("phone-reload").addEventListener("click", () => {
-      frame.src = byId("phone-open-view").href;
+      if (currentPairing) showViewer(currentPairing);
+    });
+    window.addEventListener("pagehide", () => {
+      clearInterval(statsTimer);
+      clearTimeout(waitingTimer);
+    });
+    window.addEventListener("pageshow", event => {
+      if (event.persisted && currentPairing) showViewer(currentPairing);
     });
     const saved = api.savedPairing();
     if (saved) showViewer(saved);
