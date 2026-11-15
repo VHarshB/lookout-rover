@@ -1,30 +1,16 @@
-/*! Hoot — the Lookout Rover mascot. No dependencies.
- *
- * Add to index.html (2 lines):
- *   <div id="mascot"></div>          ← where Hoot should appear
- *   <script src="mascot.js"></script> ← just before </body>
- *
- * Hoot reads the page's #state, #target, #heading, #distance and #heard
- * elements, so the steering/safety code is never touched.
- *   - Eyes  = where the driver is looking (#target)
- *   - Head  = where the rover is actually facing (#heading)
- *   - Mood  = the rover/firmware state (#state)
- */
 (() => {
 "use strict";
 
 const CONFIG = {
   name: "Hoot",
-  maxAngle: 55,        // matches MAX_YAW / MAX_TARGET
-  sound: false,        // start muted; press M or the voice button to enable
-  audioBase: null,     // e.g. "voice" → plays voice/<lineId>.mp3 made with Amazon Polly
-  fps: 30,             // capped so face tracking keeps the CPU
-  dozeAfter: 30000,    // ms of no driving before Hoot dozes off
+  maxAngle: 55,        
+  sound: false,        
+  audioBase: null,     
+  fps: 30,            
+  dozeAfter: 30000,   
 };
 
-// Spoken lines. They never contain the voice commands (stop, halt, brake, freeze,
-// resume, center, forward, reverse, back, left, right, go, turn, ahead, straight, roll), so the
-// mic can't mistake Hoot for the driver. Captions may show command words.
+
 const LINES = {
   hello:    {say: "Hi, I'm Hoot! I'll keep watch."},
   wake:     {say: "Camera on. Let me see you."},
@@ -74,8 +60,7 @@ const MOODS = {
 };
 const ACTIVE = new Set(["happy", "turning", "driving", "reversing", "startled", "confused", "stuck", "worried", "holding", "focus"]);
 
-// Page/firmware state text → mood. Matches index.html render() and the
-// XRP firmware reasons (OBSTACLE, NO_ECHO, COMMAND_LOST, WHEELS_STALLED, POWER_OFF).
+
 function moodFor(text) {
   const s = (text || "").toLowerCase();
   if (!s || s.includes("usb disconnected") || s.includes("connect the red board")) return "sleep";
@@ -101,7 +86,7 @@ function moodFor(text) {
 const parseDeg = t => {
   if (!t || !/\d/.test(t)) return null;
   const n = parseFloat(t);
-  return /right/i.test(t) ? -n : n;      // page shows "12° left" for +12
+  return /right/i.test(t) ? -n : n;      
 };
 const parseDist = t => {
   if (!t || t === "—") return undefined;
@@ -183,7 +168,7 @@ const CSS = `
 .lk-card.lk-big .lk-read{font-size:clamp(.8rem,1.8vh,1.1rem)}
 `;
 
-// Eye centres and radius (viewBox 0 0 320 340).
+
 const L = {x: 116, y: 150}, R = {x: 204, y: 150}, ER = 36;
 const DISC = "#3d4867";
 
@@ -330,8 +315,8 @@ class Mascot {
     this.glow = "#ffb547"; this.glowT = "#ffb547";
     this.iris = "#ffb547"; this.irisT = "#ffb547";
     this.mood = null; this.moodAt = 0; this.override = null;
-    this.look = 0; this.lookT = null;     // driver look, -1..1 (screen units)
-    this.turn = 0; this.turnT = 0;        // rover heading, -1..1
+    this.look = 0; this.lookT = null;     
+    this.turn = 0; this.turnT = 0;       
     this.distance = undefined;
     this.gaze = {x: 0, y: 0, tx: 0, ty: 0, next: 0};
     this.blinkAt = performance.now() + 1500; this.blinkUntil = 0;
@@ -363,10 +348,10 @@ class Mascot {
     requestAnimationFrame(this._frame);
   }
 
-  // ---------- public API ----------
+ 
   setReason(text) {
     const mood = moodFor(text);
-    // Pulling the USB cable mid-drive: say what the firmware did, then sleep.
+   
     if (mood === "sleep" && ACTIVE.has(this.mood)) {
       this.override = {until: performance.now() + 3500};
       this.setMood("worried", false, "unplugged");
@@ -376,7 +361,7 @@ class Mascot {
     this.override = null;
     this.setMood(mood);
   }
-  setLook(deg) {           // driver target, + = left
+  setLook(deg) {          
     this.lookT = deg == null ? null : clamp(-deg / this.opts.maxAngle, -1, 1);
     this.el.you.textContent = deg == null ? "—" : fmtDeg(deg);
     if (deg != null) {
@@ -384,7 +369,7 @@ class Mascot {
       if (this._refLook == null || Math.abs(deg - this._refLook) > 3) this._refLook = deg;
     }
   }
-  setHeading(deg) {        // rover heading, + = left
+  setHeading(deg) {      
     this.turnT = deg == null ? 0 : clamp(-deg / this.opts.maxAngle, -1, 1);
     this.el.rov.textContent = deg == null ? "—" : fmtDeg(deg);
     if (deg != null) {
@@ -392,21 +377,21 @@ class Mascot {
       if (this._refHead == null || Math.abs(deg - this._refHead) > 3) this._refHead = deg;
     }
   }
-  // Tap/click Hoot: giggle and wiggle; every 3rd tap he spins his head like a real owl.
+ 
   poke() {
     const now = performance.now();
-    if (this.markActive()) return;            // a tap wakes a dozing Hoot
-    if (now < this.pokeUntil - 350) return;   // ignore rapid double taps
+    if (this.markActive()) return;           
+    if (now < this.pokeUntil - 350) return;   
     this.pokes++;
     this.pokeAt = now; this.pokeUntil = now + 1100;
-    if (this.stage) return;                   // stage view animates silently
+    if (this.stage) return;                  
     const spin = this.pokes % 3 === 0;
     if (spin) this.spinAt = now + 250;
     this.chirp(spin ? "hoo" : "giggle");
     this.tickles = (this.tickles || 0) + (spin ? 0 : 1);
     this.say(spin ? "tickle3" : ["tickle1", "tickle2", "tickle4"][(this.tickles - 1) % 3]);
   }
-  // Any driving activity resets the doze timer and wakes a dozing Hoot.
+  
   markActive() {
     this.lastActive = performance.now();
     if (!this.drowsy) return false;
@@ -427,7 +412,7 @@ class Mascot {
     this.chirp("yawn");
     this.say("yawn");
   }
-  setDistance(cm) {        // number, null = no echo, undefined = unknown
+  setDistance(cm) {        
     this.distance = cm;
     const m = this.el.meter;
     if (cm === undefined) { this.el.dist.textContent = "—"; m.style.width = "0"; return; }
@@ -436,7 +421,7 @@ class Mascot {
     m.style.width = clamp(cm / 120, .04, 1) * 100 + "%";
     m.style.background = cm < 20 ? "#ff5a4a" : cm < 45 ? "#ffb547" : "#5fd38d";
   }
-  heard(text) {            // a voice command was recognised
+  heard(text) {            
     if (!text) return;
     if (this.markActive()) return;
     this.nodUntil = performance.now() + 420;
@@ -452,7 +437,7 @@ class Mascot {
   toggleSound() {
     this.setSound(!this.sound);
     if (this.sound) {
-      // Runs in the click/key gesture so the browser can unlock audio.
+      
       this.chirp("ack");
       this.speak("Hoot voice on.", "sound-enabled");
     }
@@ -468,7 +453,7 @@ class Mascot {
       if ("speechSynthesis" in window) speechSynthesis.resume();
       return;
     }
-    // Invalidate async playback/error callbacks before stopping active sound.
+    
     this.audioGeneration++;
     this.speaking = false;
     if ("speechSynthesis" in window) speechSynthesis.cancel();
@@ -484,7 +469,7 @@ class Mascot {
     this.tones.clear();
   }
 
-  // ---------- mood ----------
+ 
   setMood(name, silent = false, lineOverride = null) {
     const m = MOODS[name] || MOODS.idle;
     const now = performance.now();
@@ -504,7 +489,7 @@ class Mascot {
 
     if (name === "sleep") { this.readySaid = false; }
     if (name === "idle" && prev === "sleep" && !this.greeted) { this.greeted = true; this.chirp("hoo"); this.say("hello"); return; }
-    // A face shows up after being away: say hi (at most every 8 s).
+  
     if (FACE_MOODS.has(name) && (prev === "search" || prev === "waking") && now - this.lastGreet > 8000) {
       if (name === "focus") { this.lastGreet = now; this.chirp("hoo"); this.say("hiFocus"); return; }
       if (!m.line) { this.lastGreet = now; this.chirp("hoo"); this.say("hi"); return; }
@@ -523,7 +508,7 @@ class Mascot {
     this.say(lineId);
   }
 
-  // ---------- bubble + voice ----------
+ 
   showBubble(text, ms) {
     this.el.bubble.textContent = text;
     this.el.bubble.classList.add("show");
@@ -535,7 +520,7 @@ class Mascot {
   speak(text, id) {
     if (!this.sound) return;
     const now = performance.now();
-    if (now - this.lastSpeakAt < 1200 && this.speaking) return;   // don't pile up lines
+    if (now - this.lastSpeakAt < 1200 && this.speaking) return;   
     this.lastSpeakAt = now;
     const generation = this.audioGeneration;
     const canPlay = () => this.sound && this.audioGeneration === generation;
@@ -592,7 +577,7 @@ class Mascot {
     }
   }
 
-  // ---------- animation ----------
+  
   _frame(now) {
     requestAnimationFrame(this._frame);
     if (now - this._last < 1000 / this.opts.fps - 1) return;
@@ -609,14 +594,14 @@ class Mascot {
     if (this.glow !== this.glowT) { this.glow = mixHex(this.glow, this.glowT, Math.min(1, k * 1.4)); if (k > .99) this.glow = this.glowT; }
     if (this.iris !== this.irisT) { this.iris = mixHex(this.iris, this.irisT, Math.min(1, k * 1.4)); }
 
-    // Distance anticipation: eyes widen as an obstacle gets close.
+    
     let eye = c.eye, pupil = c.pupil;
     if (typeof this.distance === "number" && (this.mood === "driving" || this.mood === "startled")) {
       const near = clamp((60 - this.distance) / 45, 0, 1);
       eye += near * .1; pupil *= 1 - near * .3;
     }
 
-    // Gaze: driver look when known, otherwise wander.
+   
     if (now > this.gaze.next) {
       this.gaze.tx = (Math.random() * 2 - 1) * c.wander;
       this.gaze.ty = (Math.random() * 2 - 1) * c.wander * .6;
@@ -628,14 +613,14 @@ class Mascot {
     this.gaze.y += (wantY - this.gaze.y) * Math.min(1, k * 1.6);
     this.turn += (this.turnT - this.turn) * k;
 
-    // Blink.
+   
     if (now > this.blinkAt) {
       this.blinkUntil = now + 170;
       this.blinkAt = now + 2200 + Math.random() * 3800 + (Math.random() < .2 ? -1900 : 0);
     }
     const blink = now < this.blinkUntil ? 1 - Math.abs((this.blinkUntil - now) / 85 - 1) : 0;
 
-    // Overlays: doze, yawn, tickle, owl head spin.
+  
     if (!this.stage && !this.drowsy && (this.mood === "idle" || this.mood === "happy") &&
         now - this.lastActive > this.opts.dozeAfter) this.doze();
     let lidTop = c.lidTop, lidBottom = c.lidBottom, blush = c.blush, tilt = c.tilt, wing = c.wing, yawn = 0, spinDeg = 0;
@@ -693,7 +678,7 @@ class Mascot {
     this.spin += c.wheel * dt * 540;
     for (const s of this.el.spokes) s.setAttribute("transform", `rotate(${this.spin % 360} ${s.dataset.x} 312)`);
 
-    // Colours.
+   
     this.root.style.setProperty("--lk-glow", this.glow);
     this.el.haloA.setAttribute("stop-color", this.glow);
     this.el.haloB.setAttribute("stop-color", this.glow);
@@ -716,8 +701,8 @@ class Mascot {
     }
   }
 
-  // ---------- modes ----------
-  watchPage() {             // read the Lookout page every 100 ms
+ 
+  watchPage() {            
     const $ = id => document.getElementById(id);
     let lastState = null;
     let lastHeard = ($("voice-command") || $("heard"))?.textContent?.replace(/^heard:\s*/i, "").trim() ?? "";
@@ -727,8 +712,7 @@ class Mascot {
       this.setLook(parseDeg($("target")?.textContent));
       this.setHeading(parseDeg($("heading")?.textContent));
       this.setDistance(parseDist($("distance")?.textContent));
-      // Newer page: #voice-command shows only commands the rover accepted
-      // ("Command: forward · local"). Older page: #heard shows the command.
+      
       const vc = $("voice-command");
       if (vc) {
         const cmd = vc.textContent.trim();
@@ -741,7 +725,7 @@ class Mascot {
       }
     }, 100);
   }
-  stageMode() {             // mirror the driver page in another window/monitor
+  stageMode() {            
     this.stage = true;
     this.sound = false;
     this.root.classList.add("lk-big");
@@ -801,12 +785,11 @@ function boot() {
   const hoot = new Mascot(host);
   window.hoot = hoot;
   if (new URLSearchParams(location.search).has("stage")) hoot.stageMode();
-  else if (document.getElementById("state")) hoot.watchPage();
-  // On the demo page (no #state), mascot.html drives Hoot with the API.
+  else if (document.getElementById("state")) hoot.watchPage();l
+ 
 }
 window.LookoutMascot = {Mascot, MOODS, LINES, moodFor};
-// Start now if the host is already on the page (script at the end of <body>),
-// otherwise wait for the page to finish loading.
+
 if (document.readyState !== "loading" || document.getElementById("mascot")) boot();
 else document.addEventListener("DOMContentLoaded", boot);
 })();
