@@ -191,7 +191,7 @@ summary { cursor: pointer; width: fit-content; }
 .camera-view [hidden], .camera-heading [hidden] { display: none !important; }
 .camera-note button { margin-top: 1rem; min-height: 44px; padding: .5rem .85rem; }
 #phone-badge { color: var(--muted); font-size: clamp(14px, 1.45vw, 20px); }
-.phone-feed video { transform: none; }
+.phone-feed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .phone-controls { margin-top: 1rem; }
 .phone-controls [hidden] { display: none !important; }
 .phone-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .65rem; }
@@ -233,27 +233,21 @@ summary { cursor: pointer; width: fit-content; }
         </div>
         <div class="camera-view" id="phone-panel" role="tabpanel" aria-labelledby="phone-tab" aria-hidden="true" data-active="false" inert>
           <div class="camera phone-feed">
-            <video id="rover-video" autoplay muted playsinline aria-label="Live rover camera"></video>
+            <iframe id="rover-video" title="Rover phone camera relay" allow="autoplay" referrerpolicy="no-referrer" hidden></iframe>
             <div id="phone-camera-note" class="camera-note"><strong>Phone camera</strong><p>Start the rear camera on your phone to see its view here.</p></div>
           </div>
           <div class="phone-controls">
             <p id="phone-status" role="status">Create a phone link or reopen your bookmarked link.</p>
             <div class="phone-actions">
               <button id="phone-pair" type="button">Create phone link</button>
-              <button id="phone-disconnect" type="button" hidden>Disconnect phone</button>
+              <button id="phone-reload" type="button" hidden>Reload viewer</button>
             </div>
             <div id="phone-pair-link" hidden>
               <div id="phone-qr" class="phone-qr" aria-label="Scan with the phone camera app" hidden></div>
               <input id="phone-url" class="phone-link" type="text" readonly aria-label="Private reusable phone link">
               <div class="phone-actions"><button id="phone-copy" type="button">Copy phone link</button></div>
             </div>
-            <p id="phone-intercom-status" role="status">Intercom off</p>
-            <div class="phone-actions">
-              <button id="phone-call" type="button" disabled>Start intercom</button>
-              <button id="phone-hangup" type="button" hidden>End intercom</button>
-              <button id="phone-audio-play" type="button" hidden>Enable laptop audio</button>
-            </div>
-            <audio id="phone-audio" autoplay playsinline></audio>
+            <a id="phone-open-view" href="#" target="_blank" rel="noopener noreferrer" hidden>Open viewer in a separate tab</a>
           </div>
         </div>
       </div>
@@ -288,9 +282,8 @@ summary { cursor: pointer; width: fit-content; }
   </section>
 </main>
 <aside id="mascot" aria-label="Hoot rover companion"></aside>
-<script defer src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-<script defer src="phone-link.js?v=4"></script>
+<script defer src="phone-video.js?v=1"></script>
 <script>
   // The XRP's Bluetooth REPL uses the Nordic UART service.
   const XRP_UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
@@ -613,7 +606,7 @@ summary { cursor: pointer; width: fit-content; }
   const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  let enabled = false, connecting = false, phoneLink = null;
+  let enabled = false, connecting = false;
   let generation = 0;
   let hidden = document.hidden;
   let stream, tracker, recognition, restartSpeech;
@@ -764,7 +757,7 @@ summary { cursor: pointer; width: fit-content; }
       send("status");
       lastPoll = now;
     }
-    if (!enabled || voiceStop || intercomActive() || hidden || !socket.ready || !liveFace(now)) {
+    if (!enabled || voiceStop || hidden || !socket.ready || !liveFace(now)) {
       discardVoiceDraft();
       if (enabled) stopMotion();
       render();
@@ -1056,7 +1049,6 @@ summary { cursor: pointer; width: fit-content; }
 
   function applyVoiceCommand(command, source) {
     if (!enabled || hidden || !socket.ready) return false;
-    if (intercomActive() && command !== "stop") return false;
     if (command === "stop") {
       latchStop();
     } else if (command === "resume") {
@@ -1151,11 +1143,6 @@ summary { cursor: pointer; width: fit-content; }
         if (quick) previewVoice(i, command, source);
         continue;
       }
-      if (phrase === "start intercom" && phoneLink?.open) {
-        showCamera("phone");
-        void phoneLink.startIntercom();
-        return;
-      }
       if (command) {
         applyVoiceCommand(command, source);
       } else if (addressed && phrase) {
@@ -1165,11 +1152,7 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function voiceEnabled(token) {
-    return enabled && generation === token && !intercomActive();
-  }
-
-  function intercomActive() {
-    return Boolean(phoneLink && phoneLink.intercom !== "off");
+    return enabled && generation === token;
   }
 
   function closeRecognition() {
@@ -1267,7 +1250,6 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   async function startVoice(token) {
-    if (intercomActive()) return;
     if (!Speech) {
       voiceLabel = "Voice unavailable in this browser";
       return;
@@ -1468,7 +1450,6 @@ summary { cursor: pointer; width: fit-content; }
   });
   window.addEventListener("pagehide", () => {
     disable();
-    phoneLink?.close();
   });
   document.addEventListener("keydown", event => {
     if (event.key === "Escape" && enabled) {
@@ -1500,79 +1481,55 @@ summary { cursor: pointer; width: fit-content; }
   setInterval(() => step(), 32);
 
   document.addEventListener("DOMContentLoaded", () => {
-    const pairButton = byId("phone-pair");
-    if (typeof window.RoverPhoneLink !== "function") {
-      byId("phone-status").textContent = "Phone service could not load. Refresh the page.";
-      pairButton.disabled = true;
+    const api = window.LookoutPhoneVideo;
+    const pair = byId("phone-pair");
+    const frame = byId("rover-video");
+    const status = byId("phone-status");
+    if (!api) {
+      pair.disabled = true;
+      status.textContent = "Phone video could not load. Refresh the page.";
       return;
     }
-    let qrLink = "";
-    const renderPhone = link => {
-      const showLink = !!(link.link && !link.open);
-      byId("phone-status").textContent = link.status;
-      byId("phone-badge").textContent = link.hasVideo ? "Phone camera live" : link.open ? "Connecting video" : "Phone offline";
-      byId("phone-camera-note").hidden = link.hasVideo;
-      pairButton.textContent = link.savedPairing ? "Listen for phone" : "Create phone link";
-      pairButton.hidden = !!(link.peer || link.starting || link.retryTimer);
-      byId("phone-disconnect").hidden = !link.data;
-      byId("phone-pair-link").hidden = !showLink;
-      const url = byId("phone-url");
-      if (url.value !== (showLink ? link.link : "")) url.value = showLink ? link.link : "";
-      const qr = byId("phone-qr");
-      if (showLink && qrLink !== link.link) {
-        qrLink = link.link;
-        qr.replaceChildren();
-        qr.hidden = typeof window.QRCode !== "function";
-        if (!qr.hidden) {
-          try { new window.QRCode(qr, {text: link.link, width: 192, height: 192}); }
-          catch (_) { qr.hidden = true; }
-        }
+
+    function showViewer(value) {
+      const link = api.bookmark(value, location.href);
+      const view = api.relayUrl(value, false);
+      byId("phone-url").value = link;
+      byId("phone-qr").replaceChildren();
+      if (typeof window.QRCode === "function") {
+        try {
+          new window.QRCode(byId("phone-qr"), {text: link, width: 192, height: 192});
+          byId("phone-qr").hidden = false;
+        } catch (_) {}
       }
-      byId("phone-call").disabled = !link.open || link.intercom !== "off";
-      byId("phone-hangup").hidden = link.intercom === "off";
-      byId("phone-audio-play").hidden = !link.audioBlocked;
-      byId("phone-intercom-status").textContent = {
-        off: link.intercomNote || "Intercom off",
-        authorizing: "Waiting for laptop microphone permission…",
-        requesting: "Waiting for someone to accept on the phone…",
-        connecting: "Connecting audio…",
-        live: "Intercom on · steering paused",
-      }[link.intercom];
-    };
-    phoneLink = new window.RoverPhoneLink({
-      role: "operator", video: byId("rover-video"), audio: byId("phone-audio"), onChange: renderPhone,
-      beforeIntercom() {
-        latchStop();
-        closeRecognition();
-        voicePackInstalling = false;
-        voiceLabel = "Driving voice paused for intercom";
-        render();
-      },
-      afterIntercom() {
-        latchStop();
-        voiceLabel = "Mic off";
-        if (enabled && !hidden) void startVoice(generation);
-        render();
-      },
+      byId("phone-pair-link").hidden = false;
+      byId("phone-open-view").href = view;
+      byId("phone-open-view").hidden = false;
+      byId("phone-reload").hidden = false;
+      byId("phone-camera-note").hidden = true;
+      byId("phone-badge").textContent = "Relay viewer";
+      frame.src = view;
+      frame.hidden = false;
+      pair.hidden = true;
+      status.textContent = "Open the saved phone link in Safari and keep the sender page open.";
+    }
+
+    pair.addEventListener("click", () => {
+      try { showViewer(api.createPairing()); }
+      catch (_) { status.textContent = "Allow site storage in this browser to save the phone link."; }
     });
-    pairButton.addEventListener("click", () => void phoneLink.start());
-    byId("phone-disconnect").addEventListener("click", () => phoneLink.disconnectPhone());
-    byId("phone-call").addEventListener("click", () => void phoneLink.startIntercom());
-    byId("phone-hangup").addEventListener("click", () => phoneLink.endIntercom());
-    byId("phone-audio-play").addEventListener("click", () => void phoneLink.playAudio());
     byId("phone-copy").addEventListener("click", async () => {
+      const input = byId("phone-url");
       try {
-        await navigator.clipboard.writeText(phoneLink.link);
-        byId("phone-status").textContent = "Link copied. Open it on your phone and bookmark it.";
-      } catch (_) {
-        byId("phone-url").select();
-      }
+        await navigator.clipboard.writeText(input.value);
+        status.textContent = "Phone link copied.";
+      } catch (_) { input.select(); }
     });
-    renderPhone(phoneLink);
-    if (phoneLink.savedPairing) void phoneLink.start();
-  });
-  window.addEventListener("pageshow", event => {
-    if (event.persisted && phoneLink?.savedPairing) void phoneLink.start();
+    byId("phone-reload").addEventListener("click", () => {
+      frame.src = byId("phone-open-view").href;
+    });
+    const saved = api.savedPairing();
+    if (saved) showViewer(saved);
   });
 </script>
 <script src="mascot.js?v=c33a4f9f7541"></script>
