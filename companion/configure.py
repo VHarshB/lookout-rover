@@ -1,10 +1,11 @@
-﻿"""Configure non-secret AWS settings locally. Never asks for access/secret keys."""
+"""Configure non-secret AWS settings locally. Never asks for access/secret keys."""
 import json
 import os
 from pathlib import Path
 
 def main():
-    print("Use AWS CLI authentication first: aws configure sso; aws sso login --profile lookout")
+    print("Personal AWS account: aws login --profile lookout (AWS CLI v2.32+).")
+    print("Organization SSO: aws configure sso --profile lookout; aws sso login --profile lookout")
     print("No AWS secret keys are entered here or stored in this repository.")
     path=Path(__file__).with_name("local-config.json")
     old=json.loads(path.read_text()) if path.exists() else {}

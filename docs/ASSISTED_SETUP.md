@@ -1,4 +1,4 @@
-﻿# Assisted vision and voice: setup and operation
+# Assisted vision and voice: setup and operation
 
 This branch implements the optional local companion. The public GitHub Pages
 console remains the manual app. To use vision and natural-language commands,
@@ -60,7 +60,34 @@ region or Bedrock model. No real AWS inference request was made during tests.
 
 1. Install AWS CLI v2 using the official Windows instructions:
    https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
-2. If you have IAM Identity Center access, create and sign into a named profile:
+2. For your **personal AWS account**, use AWS CLI v2.32.0 or newer and browser login:
+
+~~~powershell
+aws --version
+aws login --profile lookout
+aws sts get-caller-identity --profile lookout
+~~~
+
+Complete sign-in in your browser; the CLI creates temporary credentials. The
+companion installs boto3[crt] >= 1.41, required for Python to consume this login
+session. If you already installed the older requirements, update them:
+
+~~~powershell
+.\.venv\Scripts\python.exe -m pip install -r companion/requirements.txt
+~~~
+
+Your IAM user/role needs SignInLocalDevelopmentAccess for browser-based local
+development sign-in and permission to invoke the selected Bedrock model. The
+profile is named lookout; enter that when running companion.configure.
+Sign in again with aws login when the session expires. Do not create or paste
+a long-lived root access key.
+
+Official personal-account instructions:
+https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sign-in.html
+Python support requirements:
+https://docs.aws.amazon.com/boto3/latest/guide/credentials.html
+
+For an organization account with IAM Identity Center instead:
 
 ~~~powershell
 aws configure sso --profile lookout
