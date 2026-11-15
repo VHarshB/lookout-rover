@@ -5,6 +5,30 @@
   const stopTracks = stream => stream?.getTracks().forEach(track => track.stop());
   const PAIRING_STORAGE = "lookout-rover.phone-pairing.v1";
 
+  async function peerOptions() {
+    // Open Relay documents this public shared secret for its static-auth service.
+    // These are temporary TURN credentials, independent of the bookmarked pairing link.
+    const host = "staticauth.openrelay.metered.ca";
+    const text = new TextEncoder();
+    const username = Math.floor(Date.now() / 1000 + 4 * 60 * 60) + ":lookout-" + crypto.randomUUID();
+    const key = await crypto.subtle.importKey("raw", text.encode("openrelayprojectsecret"),
+      {name: "HMAC", hash: "SHA-1"}, false, ["sign"]);
+    const signature = await crypto.subtle.sign("HMAC", key, text.encode(username));
+    const credential = btoa(String.fromCharCode(...new Uint8Array(signature)));
+    return {secure: true, config: {
+      iceTransportPolicy: "relay",
+      iceServers: [{
+        urls: [
+          "turn:" + host + ":443?transport=tcp",
+          "turns:" + host + ":443?transport=tcp",
+          "turn:" + host + ":80?transport=tcp",
+        ],
+        username,
+        credential,
+      }],
+    }};
+  }
+
   function loadPairing() {
     try {
       const saved = JSON.parse(window.localStorage.getItem(PAIRING_STORAGE));
@@ -86,16 +110,16 @@
           }
           phase = "pair";
         }
-        let peer;
+        let saved;
         if (this.role === "operator") {
           phase = "storage";
-          const saved = this.getOperatorPairing();
+          saved = this.getOperatorPairing();
           this.token = saved.token;
-          phase = "pair";
-          peer = new window.Peer(saved.id, {secure: true});
-        } else {
-          peer = new window.Peer({secure: true});
         }
+        phase = "pair";
+        const options = await peerOptions();
+        if (epoch !== this.epoch) return;
+        const peer = saved ? new window.Peer(saved.id, options) : new window.Peer(options);
         this.peer = peer;
         peer.on("error", error => {
           if (this.peer !== peer) return;
@@ -116,9 +140,9 @@
           if (this.peer !== peer) return;
           if (this.role === "operator") {
             clearTimeout(this.pairTimer);
-            this.change("Listening for your phone. Scan the QR code or open your bookmarked link.");
+            this.change("Listening for your phone via free relay. Open your bookmarked link.");
           } else {
-            this.change("Connecting to the operator…");
+            this.change("Connecting to the operator via free relay…");
             this.bindData(peer.connect(this.hostId, {reliable: true, metadata: {token: this.token}}));
           }
         });
@@ -129,11 +153,11 @@
             return;
           }
           clearTimeout(this.pairTimer);
-          this.pairTimer = setTimeout(() => this.disconnectPhone("Phone connection timed out. Retry the same link."), 20000);
+          this.pairTimer = setTimeout(() => this.disconnectPhone("The phone reached this console, but the relay connection timed out."), 28000);
           this.bindData(data);
         });
         peer.on("call", call => this.answer(call));
-        this.pairTimer = setTimeout(() => this.close("Pairing timed out. Check the network and try again."), 20000);
+        this.pairTimer = setTimeout(() => this.close("Relay connection timed out. Retry using the same link."), 30000);
         this.starting = false;
         this.change();
       } catch (_) {
