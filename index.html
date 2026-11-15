@@ -92,10 +92,10 @@ summary { cursor: pointer; width: fit-content; }
 #mascot .lk-card { background: transparent; border: 0; border-radius: 0; padding: 0; margin: 0; overflow: visible; box-shadow: none; }
 #mascot .lk-stage { width: 100%; margin: 0; }
 #mascot .lk-name, #mascot .lk-mood, #mascot .lk-grow, #mascot .lk-read { display: none; }
-#mascot .lk-bar { position: absolute; right: 0; bottom: 0; margin: 0; }
-#mascot .lk-snd { width: 38px; height: 38px; min-height: 38px !important; padding: 0 !important; font-size: 0 !important; border-radius: 50% !important; }
-#mascot .lk-snd::after { content: '🔇'; font-size: 16px; }
-#mascot .lk-snd[aria-pressed='true']::after { content: '🔊'; }
+#mascot .lk-bar { position: absolute; right: 0; bottom: 0; margin: 0; z-index: 2; pointer-events: auto; }
+#mascot .lk-snd { display: grid; place-items: center; position: relative; touch-action: manipulation; width: 38px; height: 38px; min-height: 38px !important; padding: 0 !important; font-size: 0 !important; border-radius: 50% !important; }
+#mascot .lk-snd svg { display: block; pointer-events: none; }
+#mascot .lk-snd[aria-pressed='true'] { color: var(--mint) !important; border-color: var(--mint) !important; }
 #mascot .lk-say { position: absolute; bottom: calc(100% + 12px); right: 0; width: 228px; max-width: calc(100vw - 36px); min-height: 0; pointer-events: none; opacity: 0; visibility: hidden; }
 #mascot:hover .lk-say, #mascot:focus-within .lk-say { opacity: 1; visibility: visible; }
 #mascot .lk-bubble { max-width: 100%; font-size: 13px; }
@@ -1205,6 +1205,6 @@ summary { cursor: pointer; width: fit-content; }
   render();
   setInterval(() => step(), 32);
 </script>
-<script src="mascot.js"></script>
+<script src="mascot.js?v=c33a4f9f7541"></script>
 </body>
 </html>

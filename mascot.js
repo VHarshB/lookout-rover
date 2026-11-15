@@ -305,7 +305,7 @@ class Mascot {
         <div class="lk-stage" tabindex="0" role="button" aria-label="Interact with Hoot">${SVG}</div>
         <div class="lk-bar">
           <span class="lk-name">${this.opts.name}</span><span class="lk-mood">On watch</span><span class="lk-grow"></span>
-          <button type="button" class="lk-snd" title="Toggle ${this.opts.name}'s voice (M)">🔊</button>
+          <button type="button" class="lk-snd" aria-pressed="false" aria-label="Enable Hoot voice" title="Enable Hoot voice (M)"></button>
         </div>
         <div class="lk-read"><span>You look <b class="lk-you">—</b></span><span>Rover faces <b class="lk-rov">—</b></span>
           <span class="lk-meter" title="Front distance">Front <i><b></b></i><b class="lk-dist">—</b></span></div>
@@ -337,12 +337,18 @@ class Mascot {
     this.blinkAt = performance.now() + 1500; this.blinkUntil = 0;
     this.nodUntil = 0; this.spin = 0; this.speaking = false;
     this.lastSpoken = {}; this.lastSpeakAt = 0; this.bubbleUntil = 0; this.greeted = false; this.readySaid = false;
-    this.sound = this.opts.sound;
+    this.sound = false;
+    this.audioGeneration = 0;
+    this.voiceAudio = null;
+    this.tones = new Set();
     this.lastActive = performance.now(); this.drowsy = false; this.yawnUntil = 0;
     this.pokeAt = 0; this.pokeUntil = 0; this.pokes = 0; this.spinAt = 0; this.lastGreet = -1e9;
     this._refLook = null; this._refHead = null;
     this.channel = "BroadcastChannel" in window ? new BroadcastChannel("lookout-mascot") : null;
-    this.el.snd.addEventListener("click", () => this.setSound(!this.sound));
+    this.el.snd.addEventListener("click", event => {
+      event.stopPropagation();
+      this.toggleSound();
+    });
     this.root.querySelector(".lk-stage").addEventListener("pointerdown", () => this.poke());
     this.root.querySelector(".lk-stage").addEventListener("keydown", event => {
       if (event.key === "Enter" || event.key === " ") {
@@ -443,13 +449,39 @@ class Mascot {
     this.showBubble(line.caption || line.say, line.say ? 4200 : 1e9);
     if (line.say) this.speak(line.say, id);
   }
+  toggleSound() {
+    this.setSound(!this.sound);
+    if (this.sound) {
+      // Runs in the click/key gesture so the browser can unlock audio.
+      this.chirp("ack");
+      this.speak("Hoot voice on.", "sound-enabled");
+    }
+  }
   setSound(on) {
-    this.sound = on;
-    this.el.snd.textContent = on ? "🔊 voice" : "🔇 muted";
-    this.el.snd.setAttribute("aria-pressed", String(on));
-    this.el.snd.setAttribute("aria-label", on ? "Mute Hoot voice" : "Enable Hoot voice");
-    this.el.snd.title = (on ? "Mute" : "Enable") + " Hoot voice (M)";
-    if (!on && "speechSynthesis" in window) speechSynthesis.cancel();
+    this.sound = Boolean(on);
+    this.el.snd.setAttribute("aria-pressed", String(this.sound));
+    this.el.snd.setAttribute("aria-label", this.sound ? "Mute Hoot voice" : "Enable Hoot voice");
+    this.el.snd.title = (this.sound ? "Mute" : "Enable") + " Hoot voice (M)";
+    this.el.snd.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4 6 8H3v8h3l5 4z"/>${this.sound ? '<path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>' : '<path d="m16 9 5 6m0-6-5 6"/>'}</svg>`;
+    if (this.sound) {
+      if (_ctx?.state === "suspended") void _ctx.resume().catch(() => {});
+      if ("speechSynthesis" in window) speechSynthesis.resume();
+      return;
+    }
+    // Invalidate async playback/error callbacks before stopping active sound.
+    this.audioGeneration++;
+    this.speaking = false;
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
+    if (this.voiceAudio) {
+      this.voiceAudio.onplay = this.voiceAudio.onended = this.voiceAudio.onerror = null;
+      this.voiceAudio.pause();
+      this.voiceAudio = null;
+    }
+    for (const oscillator of this.tones) {
+      try { oscillator.stop(); } catch (_) {}
+      oscillator.disconnect();
+    }
+    this.tones.clear();
   }
 
   // ---------- mood ----------
@@ -505,21 +537,28 @@ class Mascot {
     const now = performance.now();
     if (now - this.lastSpeakAt < 1200 && this.speaking) return;   // don't pile up lines
     this.lastSpeakAt = now;
+    const generation = this.audioGeneration;
+    const canPlay = () => this.sound && this.audioGeneration === generation;
     const tts = () => {
-      if (!("speechSynthesis" in window)) return;
+      if (!canPlay() || !("speechSynthesis" in window)) return;
       speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.pitch = 1.45; u.rate = 1.06; u.volume = 1;
       const v = pickVoice(); if (v) u.voice = v;
-      u.onstart = () => { this.speaking = true; };
-      u.onend = u.onerror = () => { this.speaking = false; };
+      u.onstart = () => { if (canPlay()) this.speaking = true; };
+      u.onend = u.onerror = () => { if (canPlay()) this.speaking = false; };
       speechSynthesis.speak(u);
     };
     if (this.opts.audioBase) {
       const a = new Audio(this.opts.audioBase.replace(/\/$/, "") + "/" + id + ".mp3");
-      a.onplay = () => { this.speaking = true; };
-      a.onended = () => { this.speaking = false; };
-      a.onerror = () => { this.speaking = false; tts(); };
+      if (this.voiceAudio) {
+        this.voiceAudio.onplay = this.voiceAudio.onended = this.voiceAudio.onerror = null;
+        this.voiceAudio.pause();
+      }
+      this.voiceAudio = a;
+      a.onplay = () => { if (canPlay()) this.speaking = true; else a.pause(); };
+      a.onended = () => { if (canPlay()) this.speaking = false; if (this.voiceAudio === a) this.voiceAudio = null; };
+      a.onerror = () => { if (canPlay()) { this.speaking = false; tts(); } };
       a.play().catch(tts);
     } else tts();
   }
@@ -540,6 +579,8 @@ class Mascot {
     const t0 = ctx.currentTime + .01;
     for (const [f1, f2, at, dur] of notes) {
       const o = ctx.createOscillator(), g = ctx.createGain();
+      this.tones.add(o);
+      o.onended = () => { this.tones.delete(o); o.disconnect(); g.disconnect(); };
       o.type = kind === "alert" ? "triangle" : "sine";
       o.frequency.setValueAtTime(f1, t0 + at);
       o.frequency.exponentialRampToValueAtTime(f2, t0 + at + dur);
@@ -750,7 +791,7 @@ if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => { _voic
 
 document.addEventListener("keydown", e => {
   if ((e.key === "m" || e.key === "M") && !/input|textarea|select/i.test(e.target.tagName) && window.hoot) {
-    window.hoot.setSound(!window.hoot.sound);
+    window.hoot.toggleSound();
   }
 });
 
