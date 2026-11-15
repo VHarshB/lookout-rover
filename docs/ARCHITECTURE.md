@@ -1,8 +1,11 @@
 # Architecture: from hands-free control to visual navigation
 
+**Implementation update:** the optional local companion is implemented on feature/assisted-vision-navigation. See [setup and operating limits](ASSISTED_SETUP.md). The manual baseline and the original broader design below remain reference material; general path planning and reliable autonomous obstacle routing are still future work.
+
+
 Lookout Rover is a browser-controlled XRP with two independent vision paths: operator head tracking for manual steering, and a vehicle-mounted phone stream for seeing the surroundings. The proposed OpenCV extension adds perception and navigation to the vehicle stream.
 
-**Current** means present in the repository reviewed at bb89619. **Planned** means design only. Board behavior is based on the supplied READY_FACE_V2 controller; that firmware is external to this repository.
+**Current** in the manual baseline sections means present at bb89619. Later design sections describe the broader roadmap; the local prototype now implements detection, target selection, Bedrock intent interpretation, explicit authority and supervised range-validated approach. Board behavior is based on the supplied READY_FACE_V2 controller; that firmware is external to this repository.
 
 ## 1. Deployment and physical connections — current
 
@@ -266,6 +269,6 @@ Measure capture-to-observation age, inference duration, dropped frames, control-
 
 The first OpenCV milestone adds perception and overlays; it does not change the active phone pairing, Bluetooth/USB transport or firmware. Navigation later adds a goal parser, tracker/range estimator, authority gate and a bounded command adapter. Board-side safety remains local.
 
-No OpenCV package, object model, frame bridge, autonomous planner or Python vision server is present today. phone-link.js is a legacy PeerJS implementation, not the current video pipeline. There is no custom GitHub Actions workflow in this tree; Pages currently publishes main through its configured Pages deployment.
+The optional companion now includes OpenCV, a pinned detector download, frame bridge, deterministic approach controller and local Python service. A general autonomous path planner is not implemented. phone-link.js is a legacy PeerJS implementation, not the current video pipeline. There is no custom GitHub Actions workflow in this tree; Pages currently publishes main through its configured Pages deployment.
 
-This document is an architecture and implementation roadmap, not an activation of autonomous movement.
+This document includes the original broader architecture roadmap. Start the optional prototype through the setup guide; reading this document or opening GitHub Pages does not activate assisted movement.
