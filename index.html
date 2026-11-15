@@ -300,6 +300,7 @@ summary { cursor: pointer; width: fit-content; }
   const XRP_UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
   const XRP_UART_WRITE = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
   const XRP_UART_READ = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+  const steeringPauses = [];
   const steeringTrace = {frame: "No frames yet", pose: "Not sampled", write: "None", reply: "None", aim: "None"};
   const CONTROLLER_START = "exec(open('/lookout_face_control.py').read())\r";
 
@@ -446,7 +447,7 @@ summary { cursor: pointer; width: fit-content; }
         } else {
           await session.writer.write(bytes);
         }
-        steeringTrace.write = text.trim() + " ? completed in " + Math.round(performance.now() - writeAt) + " ms";
+        steeringTrace.write = text.trim() + " - completed in " + Math.round(performance.now() - writeAt) + " ms";
         if (text.startsWith("AIM ")) steeringTrace.aim = steeringTrace.write;
         completed = true;
       } finally {
@@ -556,7 +557,7 @@ summary { cursor: pointer; width: fit-content; }
       }
       if (command) {
         void this.write(session, command).catch(error => {
-          steeringTrace.write = command.trim() + " ? failed: " + error.message;
+          steeringTrace.write = command.trim() + " - failed: " + error.message;
           void this.close(session, session.label + " connection was lost.");
         });
       }
@@ -649,14 +650,18 @@ summary { cursor: pointer; width: fit-content; }
     if (socket.ready) socket.send(JSON.stringify({kind, ...fields}));
   };
 
-  function stopMotion() {
-    if (lastMotion !== "stop") send("stop");
+  function stopMotion(reason = "Motion cancelled") {
+    if (lastMotion !== "stop") {
+      steeringPauses.push(new Date().toISOString() + " - " + reason);
+      if (steeringPauses.length > 12) steeringPauses.shift();
+      send("stop");
+    }
     lastMotion = "stop";
     translation = null;
   }
 
   function calibrate() {
-    stopMotion();
+    stopMotion("Recenter / calibration");
     calibration = [];
     neutral = null;
     started = false;
@@ -706,6 +711,7 @@ summary { cursor: pointer; width: fit-content; }
       "Sensors: front range blocks forward <20 cm / no echo; IMU controls heading; encoders report stall. No line sensor used.",
       "Last AIM write: " + steeringTrace.aim,
       "Last completed write: " + steeringTrace.write, "Last reply: " + steeringTrace.reply,
+      "Recent pauses:\n" + steeringPauses.join("\n"),
     ].join("\n");
     const report = latestStatus && now - latestStatus.at < 650 ? latestStatus : null;
     const hasFace = liveFace(now);
@@ -800,11 +806,11 @@ summary { cursor: pointer; width: fit-content; }
     if (enabled && latestStatus && now - latestStatus.at <= 650 &&
         ["POWER_OFF", "WHEELS_STALLED"].includes(latestStatus.reason) && !motorFault) {
       motorFault = latestStatus.reason === "POWER_OFF" ? "Motor power off" : "Wheels not moving";
-      latchStop();
+      latchStop(motorFault);
     }
     if (!enabled || voiceStop || motorFault || hidden || !socket.ready || !liveFace(now)) {
       discardVoiceDraft();
-      if (enabled) stopMotion();
+      if (enabled) stopMotion(motorFault || (voiceStop ? "Stop latched" : hidden ? "Browser tab inactive" : !socket.ready ? "Board disconnected" : "Face stale/lost"));
       render();
       return;
     }
@@ -823,7 +829,7 @@ summary { cursor: pointer; width: fit-content; }
     }
     if (!latestStatus || now - latestStatus.at > 650) {
       discardVoiceDraft();
-      stopMotion();
+      stopMotion("Telemetry older than 650 ms");
       render();
       return;
     }
@@ -835,7 +841,7 @@ summary { cursor: pointer; width: fit-content; }
         text: latestStatus.distance === null ? "Front sensor has no echo" : "Obstacle ahead",
         until: now + 1800,
       };
-      stopMotion();
+      stopMotion(motionBlock.text);
       render();
       return;
     }
@@ -899,10 +905,10 @@ summary { cursor: pointer; width: fit-content; }
   function trackingWorker() {
     let model;
     self.onmessage = async event => {
-      const {kind, bundle, asset, frame, at} = event.data;
+      const {kind, bundle, asset, frame, at, gpu} = event.data;
       try {
         if (kind === "start") {
-          model = await loadModel(bundle, asset, false);
+          model = await loadModel(bundle, asset, gpu);
           self.postMessage({kind: "ready"});
         } else {
           self.postMessage({kind: "pose", pose: poseOf(model.detectForVideo(frame, at))});
@@ -937,7 +943,12 @@ summary { cursor: pointer; width: fit-content; }
           };
           worker.postMessage(message, transfers);
         });
-        await ask({kind: "start", bundle: MEDIAPIPE, asset: MODEL}, [], 12000);
+        await ask({kind: "start", bundle: MEDIAPIPE, asset: MODEL, gpu: useGpu}, [], 12000);
+        // First inference compiles the backend. Complete it before exposing a
+        // tracker, while steering is unarmed, instead of rejecting it as stale
+        // and repeating the expensive startup on another backend.
+        const warmFrame = await createImageBitmap(video);
+        await ask({kind: "frame", frame: warmFrame, at: performance.now()}, [warmFrame], 12000);
         return {
           workerBackend: true,
           canFallBack: true,
@@ -984,7 +995,7 @@ summary { cursor: pointer; width: fit-content; }
 
   function acceptPose(pose, at) {
     const age = performance.now() - at;
-    steeringTrace.pose = !pose ? "No face" : pose.rejected || (age >= FACE_TIMEOUT ? "Rejected: stale pose " + Math.round(age) + " ms" : "Yaw " + pose.yaw.toFixed(1) + "? ? age " + Math.round(age) + " ms");
+    steeringTrace.pose = !pose ? "No face" : pose.rejected || (age >= FACE_TIMEOUT ? "Rejected: stale pose " + Math.round(age) + " ms" : "Yaw " + pose.yaw.toFixed(1) + " deg - age " + Math.round(age) + " ms");
     if (!pose || pose.rejected || age >= FACE_TIMEOUT) {
       if (!liveFace(performance.now())) draw(null);
       return;
@@ -1039,7 +1050,7 @@ summary { cursor: pointer; width: fit-content; }
     const currentTracker = tracker;
     const at = performance.now();
     const mediaTime = video.currentTime;
-    steeringTrace.frame = video.videoWidth + "?" + video.videoHeight + " ? time " + mediaTime.toFixed(3) + " ? ready " + video.readyState + (video.paused ? " ? paused" : "");
+    steeringTrace.frame = video.videoWidth + "x" + video.videoHeight + " - time " + mediaTime.toFixed(3) + " - ready " + video.readyState + (video.paused ? " - paused" : "");
     if (video.readyState >= 2 && !video.paused && mediaTime !== previousFrame && at - lastSample >= TRACK_MS) {
       previousFrame = mediaTime;
       lastSample = at;
@@ -1052,7 +1063,7 @@ summary { cursor: pointer; width: fit-content; }
             // A successful but late worker result cannot arm or steer safely.
             // Try the main-thread GPU backend once; keep the freshness cutoff.
             face = null;
-            stopMotion();
+            stopMotion("Tracker worker returned stale pose");
             currentTracker.close();
             tracker = null;
             trackingError = "Worker too slow ? switching tracker";
@@ -1065,7 +1076,7 @@ summary { cursor: pointer; width: fit-content; }
         const retryOnCpu = currentTracker.canFallBack;
         trackingError = retryOnCpu ? "Face tracking restarting" : "Face tracking failed · toggle steering to retry";
         face = null;
-        stopMotion();
+        stopMotion("Tracker inference failed");
         currentTracker.close();
         tracker = null;
         if (retryOnCpu) await prepareTracker(token, false, false);
@@ -1076,7 +1087,7 @@ summary { cursor: pointer; width: fit-content; }
     scheduleTracking(token);
   }
 
-  async function prepareTracker(token, useWorker = false, useGpu = true) {
+  async function prepareTracker(token, useWorker = true, useGpu = true) {
     try {
       const result = await makeTracker(useWorker, useGpu);
       if (generation === token && enabled && stream) {
@@ -1088,7 +1099,7 @@ summary { cursor: pointer; width: fit-content; }
     } catch (_) {
       if (generation === token) {
         trackingError = "Face model unavailable";
-        stopMotion();
+        stopMotion("Face model unavailable");
       }
     }
   }
@@ -1121,12 +1132,12 @@ summary { cursor: pointer; width: fit-content; }
     byId("voice-command").closest(".command-output").querySelector("h3").textContent = accepted ? "Rover accepted" : text ? "Command not accepted" : "Rover accepted";
   }
 
-  function latchStop() {
+  function latchStop(source = "Stop button / Esc") {
     discardVoiceDraft();
     if (lastInterimVoiceIndex > lastFinalVoiceIndex) ignoredVoiceIndex = lastInterimVoiceIndex;
     voiceStop = true;
     motionBlock = null;
-    stopMotion();
+    stopMotion(source);
     render();
   }
 
@@ -1138,7 +1149,7 @@ summary { cursor: pointer; width: fit-content; }
   function applyVoiceCommand(command, source) {
     if (!enabled || hidden || !socket.ready) return false;
     if (command === "stop") {
-      latchStop();
+      latchStop("Voice stop - " + source);
     } else if (command === "resume") {
       if (motorFault && (!latestStatus || performance.now() - latestStatus.at > 650 ||
           latestStatus.reason === "POWER_OFF" || latestStatus.reason === "WHEELS_STALLED")) {
@@ -1183,7 +1194,7 @@ summary { cursor: pointer; width: fit-content; }
     if (!draft?.applied) return;
     ignoredVoiceIndex = draft.index;
     yawOffset = draft.previousYaw;
-    stopMotion();
+    stopMotion("Voice draft cancelled: " + (message || "recognizer changed"));
     if (message) voiceFeedback(message);
   }
 
@@ -1557,7 +1568,7 @@ summary { cursor: pointer; width: fit-content; }
       cancelTrackingFrame();
       face = null;
       discardVoiceDraft();
-      stopMotion();
+      stopMotion("Browser tab inactive");
     } else {
       resumeTracking();
     }

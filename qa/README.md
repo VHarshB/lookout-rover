@@ -89,3 +89,33 @@ Physical follow-up: fresh charged batteries, secure battery connector and motor
 switch, power-off inspection for wheels rubbing chassis/hair/debris/caster
 binding, then lifted-wheel test and a clear hard-floor test. Record voltage
 under load if faults recur; do not mask POWER_OFF by increasing effort.
+
+
+## Inference scheduling correction
+
+Real MediaPipe with the official portrait fixture measured a 4,176 ms cold
+first GPU inference on the main thread, then 20-27 ms warm inference. The
+worker CPU cold result was 309 ms. These explain startup stalls, not a proven
+cause of the operator's repeated pauses.
+
+The tracker now prefers GPU inside the worker, with existing model CPU
+fallback. Warm-up inference completes inside worker initialization (12 s
+bounded timeout), before a tracker can calibrate/arm, so cold compilation is
+not mistaken for a stale runtime pose and restarted on the main thread.
+Runtime freshness and safety thresholds are unchanged.
+
+Run python qa/real_tracker_check.py for actual model inference with an official
+portrait fixture rendered as camera video. Network is required. BLE/telemetry
+are mocked. It checks calibration/arming and five seconds of command cadence
+in each camera tab with front distance NA. No pauses are allowed once armed;
+AIM gaps must stay below the 400 ms controller watchdog.
+
+Steering diagnostics now includes twelve recent Stop events with timestamps
+and source (tracking, telemetry, voice draft rollback, voice Stop, tab switch,
+motor faults or calibration). This is required evidence for the reported
+recurring physical pauses. The screenshot showing Stopped / Stop accepted
+documents a latched Stop, not proof of low motor power.
+
+No motor gains, distance thresholds, Stop routing or controller firmware were
+changed in this correction. Physical smoothness and the source of intermittent
+POWER_OFF still require live diagnostics.
