@@ -1,0 +1,32 @@
+
+@font-face { font-family: 'Fraunces'; src: url('assets/fonts/fraunces.ttf') format('truetype'); font-weight: 100 900; font-display: swap; }
+:root { --gold: #ecc66a; --gold-line: rgba(236, 198, 106, .4); --ocean: #45b8e2; --ember: #ff8a3d; --crimson: #d7263d; --lavender: #cdb8f4; }
+
+
+h1, .camera-heading h2, #state, #voice-state, .camera-note strong { font-family: 'Fraunces', Georgia, serif; }
+dt { font-family: 'Instrument Sans', 'Segoe UI', sans-serif; }
+
+
+.masthead { border-bottom-color: var(--gold-line); }
+.brand>svg { stroke: var(--gold); }
+.camera { box-shadow: 0 0 0 1px var(--gold-line); }
+body[data-face='true'] .camera { box-shadow: 0 0 0 1px var(--ocean); }
+.connection-actions button, #usb, #bluetooth { border-color: var(--gold); color: var(--gold); }
+
+.motion-panel[data-tone='ready'] #state { color: #8fe3f7; }
+.motion-panel[data-tone='danger'] #state { color: #ff8a9a; }
+
+
+#stop { background: var(--crimson); border-color: var(--crimson); }
+#stop:hover:enabled { background: #bf1f34; border-color: #bf1f34; }
+#enable:enabled { background: var(--ember); border-color: var(--ember); color: #2a1405; font-weight: 600; }
+#enable:hover:enabled { background: #ff9a52; border-color: #ff9a52; }
+#enable[aria-pressed='true'] { background: var(--ocean); border-color: var(--ocean); color: #062236; }
+
+
+dl>div:nth-child(1) dt { color: #8fe3f7; }
+dl>div:nth-child(2) dt { color: #ffb07a; }
+dl>div:nth-child(3) dt { color: #ff9ccb; }
+
+
+#mascot .lk-snd { border-color: var(--gold) !important; color: var(--gold) !important; }
