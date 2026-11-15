@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lookout Rover · AWS live map</title>
+<style>
+  :root { color-scheme: dark; --night: #140f2b; --ink: #fff3d6; --muted: #b9add6; --gold: #ecc66a; --aws: #ff9900;
+    --ocean: #45b8e2; --lilac: #cdb8f4; --pink: #ff7eb6; --crimson: #ff6b81; }
+  html, body { margin: 0; height: 100%; background: var(--night); color: var(--ink); font-family: 'Instrument Sans', 'Segoe UI', sans-serif; overflow: hidden; }
+  body { background: radial-gradient(ellipse 60% 60% at 0% 100%, rgba(69,184,226,.2), transparent 70%),
+                     radial-gradient(ellipse 50% 50% at 100% 0%, rgba(205,184,244,.14), transparent 70%), var(--night); }
+  .top { position: absolute; left: 3vw; right: 3vw; top: 2.6vh; display: flex; justify-content: space-between; align-items: baseline; gap: 2vw; }
+  h1 { margin: 0; font: 700 clamp(22px, 3.2vw, 46px)/1.1 'Fraunces', Georgia, serif; }
+  .sub { margin: .5vh 0 0; color: var(--muted); font-size: clamp(13px, 1.25vw, 19px); }
+  #status { white-space: nowrap; font-size: clamp(12px, 1.1vw, 17px); padding: 8px 14px; border-radius: 999px;
+    background: rgba(29,23,65,.85); border: 1px solid rgba(236,198,106,.4); }
+  #status::before { content: ''; display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 9px; background: #8d82ad; }
+  body[data-live='true'] #status::before { background: var(--aws); box-shadow: 0 0 10px var(--aws); }
+  body[data-demo='true'] #status { border-color: var(--pink); }
+  svg { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; }
+  .node rect { fill: #1f1846; stroke: rgba(236,198,106,.5); stroke-width: 1.5; transition: fill .3s; }
+  .node.aws rect { fill: #2a1d3a; stroke: var(--aws); }
+  .node.hit rect { fill: #3a2a55; filter: drop-shadow(0 0 14px rgba(255,153,0,.75)); }
+  .node.busy rect { animation: busy 1s ease-in-out infinite; }
+  @keyframes busy { 50% { fill: #4a2f5f; } }
+  .node .name { font: 700 22px 'Instrument Sans', 'Segoe UI', sans-serif; fill: var(--ink); }
+  .node .tag { font: 700 13px 'Instrument Sans', 'Segoe UI', sans-serif; fill: var(--aws); letter-spacing: .5px; }
+  .node .role { font: 400 15px 'Instrument Sans', 'Segoe UI', sans-serif; fill: #d9cff2; }
+  .node .count { font: 600 26px 'IBM Plex Mono', Consolas, monospace; fill: var(--gold); text-anchor: end; }
+  .node .state { font: 600 14px 'Instrument Sans', 'Segoe UI', sans-serif; fill: var(--lilac); }
+  .wire { fill: none; stroke: rgba(236,198,106,.35); stroke-width: 2.5; stroke-dasharray: 6 8; }
+  .wire.aws { stroke: rgba(255,153,0,.45); }
+  .wire.audio { stroke: rgba(255,126,182,.45); }
+  .lbl { font: 600 14px 'Instrument Sans', 'Segoe UI', sans-serif; fill: var(--muted); }
+  .zone { fill: none; stroke: rgba(236,198,106,.35); stroke-dasharray: 5 7; }
+  .zone.aws { stroke: rgba(255,153,0,.5); }
+  .zone-t { font: 700 15px 'Instrument Sans', 'Segoe UI', sans-serif; fill: var(--gold); }
+  .zone-t.aws { fill: var(--aws); }
+  #feed { margin: 0; padding: 0; list-style: none; font: 400 14px/1.55 'IBM Plex Mono', Consolas, monospace; color: var(--muted); }
+  #feed li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #feed li { opacity: .9; } #feed li:first-child { color: var(--ink); }
+  #feed b { color: var(--aws); font-weight: 600; }
+  .note { margin: 0; font-size: 16px; color: var(--muted); line-height: 1.5; }
+  .feed-t { margin: 0 0 6px; font: 700 15px 'Instrument Sans', 'Segoe UI', sans-serif; color: var(--gold); }
+  .note strong { color: var(--ink); }
+  @media (prefers-reduced-motion: reduce) { .node.busy rect { animation: none; } }
+</style>
+</head>
+<body data-live="false">
+<div class="top">
+  <div><h1>Lookout Rover · AWS live</h1>
+    <p class="sub">Real traffic from the rover console, as it happens. AWS is never in the driving path.</p></div>
+  <span id="status" role="status">Waiting for the rover console…</span>
+</div>
+
+<svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid meet" aria-label="Animated AWS architecture">
+  <rect class="zone" x="50" y="150" width="360" height="680" rx="22"/><text class="zone-t" x="72" y="180">On the laptop</text>
+  <rect class="zone aws" x="440" y="130" width="1120" height="620" rx="22"/><text class="zone-t aws" x="462" y="160">AWS serverless</text>
+
+  <path id="p1" class="wire aws" d="M360 445 H480"/>
+  <path id="p2" class="wire aws" d="M760 425 C830 425 830 225 900 225"/>
+  <path id="p3" class="wire aws" d="M760 445 H900"/>
+  <path id="p4" class="wire aws" d="M1180 445 H1260"/>
+  <path id="p5" class="wire aws" d="M760 465 C830 465 830 665 900 665"/>
+  <path id="p6" class="wire aws" d="M1180 665 H1260"/>
+  <path id="p7" class="wire audio" d="M1400 720 V800 H220 V500"/>
+  <text class="lbl" x="372" y="432">HTTPS</text>
+  <text class="lbl" x="760" y="820">MP3 voice → Hoot speaks the report</text>
+
+  <g id="n-console" class="node"><rect x="80" y="390" width="280" height="110" rx="16"/>
+    <text class="name" x="98" y="425">Rover console</text><text class="role" x="98" y="450">aws.js reads the page</text>
+    <text class="state" x="98" y="482" id="s-console">idle</text><text class="count" x="344" y="485" id="c-console">0</text></g>
+  <g id="n-lambda" class="node aws"><rect x="480" y="390" width="280" height="110" rx="16"/>
+    <text class="tag" x="498" y="418">AWS</text><text class="name" x="538" y="420">Lambda</text>
+    <text class="role" x="498" y="447">Function URL · /log /report</text>
+    <text class="state" x="498" y="482" id="s-lambda">ready</text><text class="count" x="744" y="485" id="c-lambda">0</text></g>
+  <g id="n-dynamo" class="node aws"><rect x="900" y="170" width="280" height="110" rx="16"/>
+    <text class="tag" x="918" y="198">AWS</text><text class="name" x="958" y="200">DynamoDB</text>
+    <text class="role" x="918" y="227">Mission log, every event</text>
+    <text class="state" x="918" y="262" id="s-dynamo">items stored</text><text class="count" x="1164" y="265" id="c-dynamo">0</text></g>
+  <g id="n-cw" class="node aws"><rect x="900" y="390" width="280" height="110" rx="16"/>
+    <text class="tag" x="918" y="418">AWS</text><text class="name" x="958" y="420">CloudWatch</text>
+    <text class="role" x="918" y="447">Metrics (Embedded Metric Format)</text>
+    <text class="state" x="918" y="482" id="s-cw">metrics</text><text class="count" x="1164" y="485" id="c-cw">0</text></g>
+  <g id="n-dash" class="node aws"><rect x="1260" y="390" width="280" height="110" rx="16"/>
+    <text class="tag" x="1278" y="418">AWS</text><text class="name" x="1318" y="420">Dashboard</text>
+    <text class="role" x="1278" y="447">LookoutRover, live</text>
+    <text class="state" x="1278" y="482" id="s-dash">last: —</text><text class="count" x="1524" y="485" id="c-dash"></text></g>
+  <g id="n-bedrock" class="node aws"><rect x="900" y="610" width="280" height="110" rx="16"/>
+    <text class="tag" x="918" y="638">AWS</text><text class="name" x="958" y="640">Bedrock</text>
+    <text class="role" x="918" y="667">Amazon Nova writes the report</text>
+    <text class="state" x="918" y="702" id="s-bedrock">reports</text><text class="count" x="1164" y="705" id="c-bedrock">0</text></g>
+  <g id="n-polly" class="node aws"><rect x="1260" y="610" width="280" height="110" rx="16"/>
+    <text class="tag" x="1278" y="638">AWS</text><text class="name" x="1318" y="640">Polly</text>
+    <text class="role" x="1278" y="667">Neural voice for Hoot</text>
+    <text class="state" x="1278" y="702" id="s-polly">voices</text><text class="count" x="1524" y="705" id="c-polly">0</text></g>
+  <foreignObject x="72" y="196" width="320" height="180">
+    <p xmlns="http://www.w3.org/1999/xhtml" class="note" id="note">Open the rover console in <strong>another tab of this same browser</strong>. Every event it sends to AWS flies across this map. Click <strong>Mission report</strong> there to watch Bedrock and Polly work.</p>
+  </foreignObject>
+  <foreignObject x="470" y="182" width="400" height="190">
+    <div xmlns="http://www.w3.org/1999/xhtml"><p class="feed-t">Latest traffic</p><ul id="feed" aria-live="polite"></ul></div>
+  </foreignObject>
+  <g id="dots"></g>
+</svg>
+
+<script>
+"use strict";
+const METRIC = new Set(["obstacle_stop","no_echo","command_lost","wheels_stalled","power_off","face_lost",
+  "voice_stop","voice_command","link_lost","link_up","session_start","report"]);
+const NICE = {obstacle_stop: "obstacle stop", voice_command: "voice command", face_lost: "face lost", link_lost: "link lost",
+  link_up: "link up", command_lost: "commands lost", wheels_stalled: "wheels stalled", power_off: "power off",
+  no_echo: "no echo", voice_stop: "voice stop", session_start: "session start", state_change: "state change",
+  telemetry: "telemetry", report_requested: "report requested"};
+const $ = id => document.getElementById(id);
+const counts = {console: 0, lambda: 0, dynamo: 0, cw: 0, bedrock: 0, polly: 0};
+const dots = [];
+let lastMsg = 0;
+const demo = new URLSearchParams(location.search).has("demo");
+document.body.dataset.demo = String(demo);
+
+function bump(node, n = 1) {
+  counts[node] = (counts[node] || 0) + n;
+  const c = $("c-" + node); if (c) c.textContent = counts[node];
+  hit(node);
+}
+function hit(node) {
+  const g = $("n-" + node); if (!g) return;
+  g.classList.remove("hit"); void g.getBBox(); g.classList.add("hit");
+  clearTimeout(g._t); g._t = setTimeout(() => g.classList.remove("hit"), 650);
+}
+function state(node, text, busy) {
+  const s = $("s-" + node); if (s) s.textContent = text;
+  $("n-" + node)?.classList.toggle("busy", Boolean(busy));
+}
+function fly(pathId, color, then, label = "", ms = 900) {
+  const path = $(pathId), len = path.getTotalLength();
+  const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  g.innerHTML = `<circle r="11" fill="${color}" opacity=".25"/><circle r="6" fill="${color}"/>` +
+    (label ? `<text y="-14" text-anchor="middle" style="font:700 13px 'Instrument Sans',sans-serif;fill:${color}">${label}</text>` : "");
+  $("dots").appendChild(g);
+  dots.push({g, path, len, start: performance.now(), ms, then});
+}
+function frame(now) {
+  for (let i = dots.length - 1; i >= 0; i--) {
+    const d = dots[i], p = Math.min(1, (now - d.start) / d.ms);
+    const e = p < .5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+    const pt = d.path.getPointAtLength(d.len * e);
+    d.g.setAttribute("transform", `translate(${pt.x} ${pt.y})`);
+    if (p >= 1) { d.g.remove(); dots.splice(i, 1); d.then?.(); }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+function feed(text) {
+  const li = document.createElement("li");
+  li.innerHTML = `${new Date().toLocaleTimeString([], {hour: "numeric", minute: "2-digit", second: "2-digit"}).replace(/\s?[AP]M$/i, "")}  ${text}`;
+  const ul = $("feed"); ul.prepend(li);
+  while (ul.children.length > 6) ul.lastChild.remove();
+}
+function live(session) {
+  lastMsg = performance.now();
+  document.body.dataset.live = "true";
+  $("status").textContent = (demo ? "Simulated data · " : "Live · session ") + (demo ? "rehearsal" : session);
+  $("note").hidden = true;
+}
+
+
+function onSent(names) {
+  const n = names.length, metrics = names.filter(x => METRIC.has(x));
+  const shown = [...new Set(names.filter(x => x !== "telemetry"))].map(x => NICE[x] || x);
+  bump("console", n); state("console", "sending " + n + (n === 1 ? " event" : " events"));
+  feed(`<b>${n}</b> → Lambda${shown.length ? " · " + shown.join(", ") : " · telemetry"}`);
+  fly("p1", "#ff9900", () => {
+    bump("lambda", n); state("lambda", "saved + metrics");
+    fly("p2", "#ffb347", () => bump("dynamo", n), String(n));
+    if (metrics.length) fly("p3", "#45b8e2", () => {
+      bump("cw", metrics.length);
+      fly("p4", "#45b8e2", () => { hit("dash"); state("dash", "last: " + (NICE[metrics[metrics.length - 1]] || metrics[0])); }, "", 600);
+    }, String(metrics.length));
+  }, String(n));
+}
+let reportStage = "idle", pendingDone = null;
+function onReportStart() {
+  reportStage = "sending";
+  feed("<b>Mission report</b> requested");
+  state("console", "asking for report");
+  fly("p1", "#cdb8f4", () => {
+    state("lambda", "building report", true); bump("lambda");
+    fly("p2", "#cdb8f4", () => { hit("dynamo"); state("dynamo", "reading this run"); }, "read");
+    setTimeout(() => fly("p5", "#cdb8f4", () => {
+      reportStage = "writing";
+      state("bedrock", "Nova is writing…", true);
+      if (pendingDone) { const d = pendingDone; pendingDone = null; setTimeout(() => finishReport(d.model, d.audio), 900); }
+    }, "stats"), 500);
+  }, "report");
+}
+function onReportDone(model, audio) {
+  if (reportStage === "sending") { pendingDone = {model, audio}; return; }   // let the animation catch up
+  finishReport(model, audio);
+}
+function finishReport(model, audio) {
+  reportStage = "idle";
+  state("lambda", "report sent");
+  $("n-lambda").classList.remove("busy");
+  state("bedrock", model === "template" ? "template (Bedrock off)" : "written by Nova", false);
+  bump("bedrock");
+  feed(model === "template" ? "Report from template (Bedrock unavailable)" : `<b>Bedrock</b> wrote the report (${model})`);
+  if (!audio) return;
+  fly("p6", "#ff7eb6", () => {
+    bump("polly"); state("polly", "voice ready");
+    fly("p7", "#ff7eb6", () => { state("console", "Hoot is reading it"); feed("<b>Polly</b> voice → Hoot reads the report"); }, "MP3", 1700);
+  }, "text");
+}
+
+const bus = "BroadcastChannel" in window ? new BroadcastChannel("lookout-aws") : null;
+bus?.addEventListener("message", ({data: m}) => {
+  if (demo || !m) return;
+  live(m.session || "");
+  if (m.kind === "sent") onSent(m.events || []);
+  else if (m.kind === "failed") { state("console", "retrying…"); feed(`<b>${m.count}</b> events waiting · network retry`); }
+  else if (m.kind === "report-start") onReportStart();
+  else if (m.kind === "report-done") onReportDone(m.model, m.audio);
+  else if (m.kind === "report-error") { state("bedrock", "unreachable"); $("n-lambda").classList.remove("busy"); feed("Report failed · network"); }
+});
+setInterval(() => {
+  if (document.body.dataset.live === "true" && performance.now() - lastMsg > 15000 && !demo) {
+    $("status").textContent = "Connected · waiting for rover events";
+  }
+}, 2000);
+
+
+if (demo) {
+  live("rehearsal");
+  const sample = [["telemetry", "telemetry"], ["obstacle_stop", "telemetry"], ["voice_command"], ["telemetry", "face_lost"], ["state_change", "telemetry"]];
+  let i = 0;
+  setInterval(() => onSent(sample[i++ % sample.length]), 1800);
+  setInterval(() => { onReportStart(); setTimeout(() => onReportDone("us.amazon.nova-lite-v1:0", true), 2600); }, 15000);
+}
+</script>
+</body>
+</html>
