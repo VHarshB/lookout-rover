@@ -32,7 +32,9 @@ h1 { font-size: 29px; font-weight: 650; letter-spacing: .2px; line-height: 36px;
 #connection { max-width: 380px; font-size: 20px; letter-spacing: .4px; line-height: 1.4; overflow-wrap: anywhere; }
 #connection::before { content: ''; display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #d7b380; margin-right: 20px; }
 body[data-connected='true'] #connection::before { background: var(--mint); box-shadow: 0 0 14px #b6fab735; }
-#usb { font-size: 16px; min-height: 44px; padding: 10px 14px; }
+.connection-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.connection-actions[hidden] { display: none; }
+.connection-actions button { font-size: 16px; min-height: 44px; padding: 10px 14px; }
 .workspace { display: grid; grid-template-columns: minmax(0, 960fr) minmax(0, 371fr); column-gap: clamp(28px, 4.855vw, 77px); row-gap: 44px; margin-top: 62px; align-items: start; }
 .camera-panel { min-width: 0; grid-column: 1; grid-row: 1; }
 .camera-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; height: 34px; margin-bottom: 23px; }
@@ -166,7 +168,7 @@ summary { cursor: pointer; width: fit-content; }
   .camera-note svg { width: 32px; height: 32px; margin-bottom: 9px; }
   .camera-note strong { font-size: 19px; }
   .camera-note p { font-size: 13px; margin-top: 8px; }
-  #usb { font-size: 14px; }
+  .connection-actions button { font-size: 14px; }
 }
 @media (max-width: 359px) {
   .brand { gap: 12px; }
@@ -186,7 +188,7 @@ summary { cursor: pointer; width: fit-content; }
 <main>
   <header class="masthead">
     <div class="brand"><svg viewBox="0 0 64 28" aria-hidden="true"><path d="M3 5c0 18 18 23 26 10C19 13 10 7 3 5Zm58 0c0 18-18 23-26 10C45 13 54 7 61 5Z"/><path d="m12 8 2 8m38-8-2 8"/></svg><h1>Lookout Rover</h1></div>
-    <div class="connection-group"><p id="connection" role="status">Red Board disconnected</p><button id="usb">Connect Red Board</button></div>
+    <div class="connection-group"><p id="connection" role="status">Red Board disconnected</p><div id="connection-actions" class="connection-actions" hidden><button id="bluetooth">Bluetooth</button><button id="usb">USB</button></div></div>
   </header>
   <div class="workspace">
     <section class="camera-panel" aria-labelledby="camera-title">
@@ -201,7 +203,7 @@ summary { cursor: pointer; width: fit-content; }
     <aside class="control-panel" aria-label="Rover controls">
       <section class="motion-panel" data-tone="offline" id="motion-panel" aria-labelledby="motion-label">
         <h2 id="motion-label">Rover status</h2>
-        <p id="state" role="status" aria-describedby="state-detail">USB disconnected</p>
+        <p id="state" role="status" aria-describedby="state-detail">Red Board disconnected</p>
         <p id="state-detail">Connect the Red Board to begin.</p>
       </section>
       <div class="steering-actions"><button id="stop" aria-keyshortcuts="Escape" disabled>Stop <kbd>Esc</kbd></button><button id="enable" aria-pressed="false" disabled>Enable steering</button></div>
@@ -224,11 +226,17 @@ summary { cursor: pointer; width: fit-content; }
     </section>
   </div>
   <section class="secondary" aria-label="Operator help">
-    <details><summary>Steering &amp; voice help</summary><div class="help-content"><p id="camera-guidance">Look straight to center. Turn your head to steer.</p><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop, “resume” to drive again, or “recenter” to calibrate.</p><p>Forward motion pauses below 20 cm or when the front sensor has no echo. Motion pauses when tracking or rover data is lost.</p><p>The camera view is mirrored. Use desktop Chrome or Edge over HTTPS for USB.</p></div></details>
+    <details><summary>Steering &amp; voice help</summary><div class="help-content"><p id="camera-guidance">Look straight to center. Turn your head to steer.</p><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop, “resume” to drive again, or “recenter” to calibrate.</p><p>Forward motion pauses below 20 cm or when the front sensor has no echo. Motion pauses when tracking or rover data is lost.</p><p>The camera view is mirrored. Use desktop Chrome or Edge over HTTPS. Close XRPCode before connecting the Red Board.</p></div></details>
   </section>
 </main>
 <aside id="mascot" aria-label="Hoot rover companion"></aside>
 <script>
+  // The XRP's Bluetooth REPL uses the Nordic UART service.
+  const XRP_UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+  const XRP_UART_WRITE = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+  const XRP_UART_READ = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+  const CONTROLLER_START = "exec(open('/lookout_face_control.py').read())\r";
+
   class RedBoardConnection {
     ready = false;
     pending = 0;
@@ -239,31 +247,31 @@ summary { cursor: pointer; width: fit-content; }
       return this.pending;
     }
 
-    async connect() {
+    async connect(transport = "usb") {
       if (this.session) return;
-      // requestPort must run from the Connect button's click.
-      const port = await navigator.serial.requestPort();
-      const session = {port, closing: false, pending: 0};
+      // Both permission choosers must run from the Connect button's click.
+      const bluetooth = transport === "bluetooth";
+      const device = bluetooth
+        ? await navigator.bluetooth.requestDevice({filters: [{namePrefix: "XRP"}], optionalServices: [XRP_UART]})
+        : null;
+      const port = bluetooth ? null : await navigator.serial.requestPort();
+      const session = {
+        port, device, transport, label: bluetooth ? "Bluetooth" : "USB",
+        closing: false, pending: 0, queue: Promise.resolve(),
+        decoder: new TextDecoder(), buffer: "",
+      };
       this.version = 1;
       this.session = session;
       try {
-        await port.open({baudRate: 115200});
-        session.reader = port.readable.getReader();
-        session.writer = port.writable.getWriter();
-        session.onDisconnect = () => {
-          void this.close(session, "USB disconnected. Connect the Red Board again.");
-        };
-        port.addEventListener("disconnect", session.onDisconnect);
-        session.reading = this.read(session);
-        await port.setSignals({dataTerminalReady: true});
-        await this.delay(750);
-        await this.write(session, "\x03\x03\x02");
-        await this.delay(300);
-        await this.exchange(
-          session, "exec(open('/lookout_face_control.py').read())\r", "READY_FACE", 3000,
-        );
-        await this.exchange(session, "PING\n", "PONG", 1500);
-        if (session.closing) throw new Error("USB disconnected");
+        if (bluetooth) {
+          await this.openBluetooth(session);
+          await this.startBluetoothController(session);
+        } else {
+          await this.openUsb(session);
+          await this.exchange(session, CONTROLLER_START, "READY_FACE", 3000);
+          await this.exchange(session, "PING\n", "PONG", 1500);
+        }
+        if (session.closing) throw new Error(session.label + " disconnected");
         this.ready = true;
         this.onopen?.();
       } catch (error) {
@@ -272,28 +280,114 @@ summary { cursor: pointer; width: fit-content; }
       }
     }
 
+    async openUsb(session) {
+      const {port} = session;
+      await port.open({baudRate: 115200});
+      session.reader = port.readable.getReader();
+      session.writer = port.writable.getWriter();
+      session.onDisconnect = () => {
+        void this.close(session, "USB disconnected. Connect the Red Board again.");
+      };
+      port.addEventListener("disconnect", session.onDisconnect);
+      session.reading = this.read(session);
+      await port.setSignals({dataTerminalReady: true});
+      await this.delay(750);
+      await this.write(session, "\x03\x03\x02");
+      await this.delay(300);
+    }
+
+    async openBluetooth(session) {
+      const {device} = session;
+      session.onDisconnect = () => {
+        void this.close(session, "Bluetooth disconnected. Connect the Red Board again.");
+      };
+      device.addEventListener("gattserverdisconnected", session.onDisconnect);
+      const server = await this.withTimeout(device.gatt.connect().then(gatt => {
+        if (session.closing) gatt.disconnect();
+        return gatt;
+      }), 10000, "Could not connect to the XRP");
+      const service = await this.withTimeout(server.getPrimaryService(XRP_UART), 4000, "XRP Bluetooth service unavailable");
+      session.transmit = await this.withTimeout(service.getCharacteristic(XRP_UART_WRITE), 2500, "XRP write channel unavailable");
+      session.receive = await this.withTimeout(service.getCharacteristic(XRP_UART_READ), 2500, "XRP reply channel unavailable");
+      session.onBytes = event => this.consume(session, event.target.value);
+      session.receive.addEventListener("characteristicvaluechanged", session.onBytes);
+      await this.withTimeout(session.receive.startNotifications(), 2500, "Could not listen for XRP replies");
+    }
+
+    async startBluetoothController(session) {
+      // An earlier session can leave the controller running. Clear motion before probing it.
+      try {
+        await this.exchange(session, "\rSTOP\rPING\r", "PONG", 1300);
+      } catch (error) {
+        if (session.closing || !session.device.gatt.connected || !error.replyTimeout) throw error;
+        // A fresh board is at the friendly REPL. Control-B also leaves raw REPL.
+        await this.write(session, "\x02\r");
+        await this.exchange(session, CONTROLLER_START, "READY_FACE", 4500);
+        await this.exchange(session, "PING\r", "PONG", 2000);
+      }
+      // When attaching to a running controller, its startup banner has already passed.
+      await this.exchange(session, "TELEMETRY\r", line => line.startsWith("TELEMETRY "), 2200, "V2 telemetry");
+      this.version = 2;
+    }
+
     delay(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+    async withTimeout(operation, ms, message) {
+      let timer;
+      try {
+        return await Promise.race([
+          operation, new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error(message)), ms);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async writeBluetooth(session, bytes, closingStop = false) {
+      // Conservative packet size avoids assuming a negotiated MTU. One write at a time.
+      for (let offset = 0; offset < bytes.length; offset += 20) {
+        if ((session.closing && !closingStop) || !session.device.gatt.connected) {
+          throw new Error("Bluetooth disconnected");
+        }
+        await this.withTimeout(
+          session.transmit.writeValueWithResponse(bytes.subarray(offset, offset + 20)),
+          450, "Bluetooth write timed out",
+        );
+      }
+    }
+
     async write(session, text) {
-      if (session.closing || !session.writer) throw new Error("USB disconnected");
+      if (session.closing || !(session.writer || session.transmit)) throw new Error(session.label + " disconnected");
+      const bytes = new TextEncoder().encode(text);
       session.pending++;
       this.pending = session.pending;
       try {
-        await session.writer.write(new TextEncoder().encode(text));
+        if (session.device) {
+          const operation = session.queue.then(() => this.writeBluetooth(session, bytes));
+          // A failed frame must not be followed by queued motion or a partial continuation.
+          session.queue = operation;
+          await operation;
+        } else {
+          await session.writer.write(bytes);
+        }
       } finally {
         session.pending--;
         if (this.session === session) this.pending = session.pending;
       }
     }
 
-    async exchange(session, command, expected, timeout) {
+    async exchange(session, command, expected, timeout, label = expected) {
       const reply = new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           session.waiter = null;
           const detail = session.lastLine ? " Last reply: " + session.lastLine : "";
-          reject(new Error("The board did not reply " + expected + "." + detail));
+          const error = new Error("The board did not reply " + label + "." + detail);
+          error.replyTimeout = true;
+          reject(error);
         }, timeout);
         session.waiter = {
           expected,
@@ -309,20 +403,11 @@ summary { cursor: pointer; width: fit-content; }
     }
 
     async read(session) {
-      let buffer = "";
-      const decoder = new TextDecoder();
       try {
         while (!session.closing) {
           const {value, done} = await session.reader.read();
           if (done) break;
-          buffer += decoder.decode(value, {stream: true});
-          let end;
-          while ((end = buffer.indexOf("\n")) >= 0) {
-            const line = buffer.slice(0, end).trim();
-            buffer = buffer.slice(end + 1);
-            if (line) this.process(session, line);
-          }
-          if (buffer.length > 4096) buffer = buffer.slice(-4096);
+          this.consume(session, value);
         }
       } catch (_) {
         // The serial port can disappear when power or USB is removed.
@@ -332,10 +417,23 @@ summary { cursor: pointer; width: fit-content; }
       if (!session.closing) void this.close(session, "USB disconnected. Connect the Red Board again.");
     }
 
+    consume(session, value) {
+      if (session.closing || this.session !== session || !value) return;
+      session.buffer += session.decoder.decode(value, {stream: true});
+      let end;
+      while ((end = session.buffer.indexOf("\n")) >= 0) {
+        const line = session.buffer.slice(0, end).trim();
+        session.buffer = session.buffer.slice(end + 1);
+        if (line) this.process(session, line);
+      }
+      if (session.buffer.length > 4096) session.buffer = session.buffer.slice(-4096);
+    }
+
     process(session, line) {
       session.lastLine = line;
       if (line === "READY_FACE_V2") this.version = 2;
-      if (session.waiter?.expected === line) {
+      const expected = session.waiter?.expected;
+      if (typeof expected === "function" ? expected(line) : expected === line) {
         session.waiter.finish();
         return;
       }
@@ -372,7 +470,7 @@ summary { cursor: pointer; width: fit-content; }
       }
       if (command) {
         void this.write(session, command).catch(() => {
-          void this.close(session, "USB connection was lost.");
+          void this.close(session, session.label + " connection was lost.");
         });
       }
     }
@@ -382,7 +480,16 @@ summary { cursor: pointer; width: fit-content; }
       session.closing = true;
       const wasReady = this.ready;
       this.ready = false;
-      session.waiter?.finish(new Error("USB disconnected"));
+      session.waiter?.finish(new Error(session.label + " disconnected"));
+      if (session.device) {
+        const {device, receive, onBytes, onDisconnect} = session;
+        if (receive && onBytes) receive.removeEventListener("characteristicvaluechanged", onBytes);
+        if (onDisconnect) device.removeEventListener("gattserverdisconnected", onDisconnect);
+        if (wasReady && session.pending === 0 && device.gatt.connected) {
+          try { await this.writeBluetooth(session, new TextEncoder().encode("STOP\r"), true); } catch (_) {}
+        }
+        device.gatt.disconnect();
+      }
       if (message || wasReady) this.onclose?.(message);
 
       if (session.reader) {
@@ -396,8 +503,10 @@ summary { cursor: pointer; width: fit-content; }
         }
         try { session.writer.releaseLock(); } catch (_) {}
       }
-      if (session.onDisconnect) session.port.removeEventListener("disconnect", session.onDisconnect);
-      try { await session.port.close(); } catch (_) {}
+      if (session.port) {
+        if (session.onDisconnect) session.port.removeEventListener("disconnect", session.onDisconnect);
+        try { await session.port.close(); } catch (_) {}
+      }
       if (this.session === session) {
         this.session = null;
         this.pending = 0;
@@ -411,6 +520,10 @@ summary { cursor: pointer; width: fit-content; }
   const canvas = byId("overlay");
   const ctx = canvas.getContext("2d");
   const usbButton = byId("usb");
+  const bluetoothButton = byId("bluetooth");
+  const connectionActions = byId("connection-actions");
+  const hasUsb = window.isSecureContext && "serial" in navigator;
+  const hasBluetooth = window.isSecureContext && "bluetooth" in navigator;
   const enableButton = byId("enable");
   const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
   const LOCAL_SPEECH_PACK = {langs: ["en-US"], processLocally: true, quality: "command"};
@@ -424,7 +537,7 @@ summary { cursor: pointer; width: fit-content; }
   const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  let enabled = false;
+  let enabled = false, connecting = false;
   let generation = 0;
   let hidden = document.hidden;
   let stream, tracker, recognition, restartSpeech;
@@ -481,7 +594,11 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function render() {
-    usbButton.hidden = socket.ready;
+    connectionActions.hidden = socket.ready || !(hasUsb || hasBluetooth);
+    bluetoothButton.hidden = !hasBluetooth;
+    bluetoothButton.disabled = connecting;
+    usbButton.hidden = !hasUsb;
+    usbButton.disabled = connecting;
     enableButton.textContent = enabled ? "Disable steering" : "Enable steering";
     enableButton.setAttribute("aria-pressed", String(enabled));
     enableButton.disabled = !enabled && !socket.ready;
@@ -498,7 +615,7 @@ summary { cursor: pointer; width: fit-content; }
     renderMetric("distance", report ? (report.distance === null ? "No echo" : Number(report.distance.toFixed(1)) + " cm") : "—");
 
     let reason;
-    if (!socket.ready) reason = "USB disconnected";
+    if (!socket.ready) reason = connecting ? "Connecting" : "Red Board disconnected";
     else if (!enabled) reason = "Steering off";
     else if (voiceStop) reason = "Stopped";
     else if (hidden) reason = "Paused · page inactive";
@@ -519,14 +636,13 @@ summary { cursor: pointer; width: fit-content; }
     else if (translation) reason = translation.base > 0 ? "Driving forward" : "Reversing";
     else if (Math.abs(angleDelta(target() - report.heading)) <= 2.5) reason = "Aligned";
     else reason = "Turning";
-    if (!socket.ready && usbButton.disabled && byId("connection").textContent === "Connecting…") reason = "Connecting";
     if (byId("state").textContent !== reason) byId("state").textContent = reason;
     byId("state").dataset.long = String(reason.length > 15);
     const safe = ["Aligned", "Turning", "Driving forward", "Reversing"].includes(reason);
     const danger = ["Obstacle ahead", "Stopped", "Wheels not moving", "Motor power off"].includes(reason);
     byId("motion-panel").dataset.tone = danger ? "danger" : safe ? "ready" : "offline";
     const guidance = {
-      "USB disconnected": "Connect the Red Board to begin.",
+      "Red Board disconnected": "Connect the Red Board to begin.",
       "Connecting": "Waiting for the Red Board handshake.",
       "Steering off": "Enable steering to start the camera and mic.",
       "Stopped": "Say “resume” to drive again.",
@@ -1143,13 +1259,13 @@ summary { cursor: pointer; width: fit-content; }
 
   socket.onopen = () => {
     latestStatus = null;
-    byId("connection").textContent = socket.version === 2 ? "Red Board connected" : "Red Board connected · controller update available";
+    const detail = socket.version === 2 ? socket.session.label : "controller update available";
+    byId("connection").textContent = "Red Board connected · " + detail;
     render();
   };
   socket.onclose = message => {
     disable();
     latestStatus = null;
-    usbButton.disabled = false;
     byId("connection").textContent = message || "Red Board disconnected";
     render();
   };
@@ -1163,22 +1279,23 @@ summary { cursor: pointer; width: fit-content; }
     step();
   };
 
-  if (!window.isSecureContext || !("serial" in navigator)) {
-    usbButton.disabled = true;
+  if (!(hasUsb || hasBluetooth)) {
     byId("connection").textContent = "Open the HTTPS page in desktop Chrome or Edge";
-  } else {
-    usbButton.addEventListener("click", async () => {
-      usbButton.disabled = true;
-      byId("connection").textContent = "Connecting…";
-      render();
-      try { await socket.connect(); }
-      catch (error) {
-        byId("connection").textContent = "USB: " + error.message;
-        usbButton.disabled = false;
-        render();
-      }
-    });
   }
+  async function connectRedBoard(transport, label) {
+    if (connecting || socket.session) return;
+    connecting = true;
+    byId("connection").textContent = "Connecting via " + label + "…";
+    render();
+    try { await socket.connect(transport); }
+    catch (error) { byId("connection").textContent = label + " · " + error.message; }
+    finally {
+      connecting = false;
+      render();
+    }
+  }
+  bluetoothButton.addEventListener("click", () => void connectRedBoard("bluetooth", "Bluetooth"));
+  usbButton.addEventListener("click", () => void connectRedBoard("usb", "USB"));
   byId("stop").addEventListener("click", () => {
     latchStop();
     voiceFeedback("Command: stop · button");
