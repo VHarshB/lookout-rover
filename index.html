@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lookout Rover</title>
+<style>
+  :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif;
+    background: #101815; color: #f1f6f3; }
+  body { margin: 0; }
+  main { width: min(67rem, calc(100% - 2rem)); margin: 2.2rem auto; }
+  header { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem 1rem;
+    justify-content: space-between; border-bottom: 1px solid #2c4137; padding-bottom: 1rem; }
+  h1, h2, p { margin: 0; }
+  h1 { font-size: clamp(1.55rem, 4vw, 2.35rem); letter-spacing: -.045em; }
+  h2 { font-size: 1rem; }
+  p, label, dd { color: #c3d2cb; }
+  #connection { font-weight: 650; color: #abe6c2; }
+  .layout { display: grid; grid-template-columns: 1.45fr 1fr; gap: 1rem; margin-top: 1rem; }
+  section { padding: 1rem; border: 1px solid #345045; border-radius: .85rem;
+    background: #182520; min-width: 0; }
+  .camera { position: relative; aspect-ratio: 16 / 10; border-radius: .6rem; overflow: hidden;
+    display: grid; place-items: center; background: #0c1511; margin-top: .7rem; }
+  video, canvas { position: absolute; width: 100%; height: 100%; object-fit: contain; }
+  video { transform: scaleX(-1); }
+  canvas { pointer-events: none; }
+  .camera-note { padding: 1rem; text-align: center; }
+  .actions { margin-top: .75rem; display: flex; flex-wrap: wrap; gap: .45rem; }
+  .help { margin-top: .65rem; font-size: .87rem; line-height: 1.45; }
+  button { touch-action: none; user-select: none; min-height: 2.55rem; padding: .5rem .75rem;
+    border: 1px solid #507160; color: #f1f6f3; border-radius: .45rem;
+    background: #284235; font: 600 .88rem Inter, system-ui, sans-serif; }
+  button:disabled { opacity: .45; }
+  button:focus-visible { outline: 2px solid #abe6c2; outline-offset: 2px; }
+  button.active, button[aria-pressed="true"] { background: #35684e; }
+  #stop { background: #813a34; border-color: #af5c54; grid-area: stop; }
+  #state { margin-top: .5rem; min-height: 2.4em; }
+  dl { display: grid; grid-template-columns: 1fr auto; gap: .45rem; margin: .8rem 0; }
+  dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .drive { display: grid; grid-template-areas: ". forward ." "left stop right" ". reverse .";
+    grid-template-columns: repeat(3, 1fr); gap: .4rem; margin-top: .65rem; }
+  [data-drive="forward"] { grid-area: forward; }
+  [data-drive="reverse"] { grid-area: reverse; }
+  [data-drive="left"] { grid-area: left; }
+  [data-drive="right"] { grid-area: right; }
+  .voice { margin: .95rem 0 .25rem; }
+  #heard { overflow-wrap: anywhere; }
+  @media (max-width: 700px) { main { margin-top: 1rem; } .layout { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Lookout Rover</h1><p id="connection" role="status">Red Board disconnected</p></header>
+  <div class="layout">
+    <section>
+      <h2>Operator camera</h2>
+      <div class="camera">
+        <p id="camera-note" class="camera-note">Enable your laptop camera to start tracking.</p>
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="actions">
+        <button id="camera">Enable camera</button>
+        <button id="center" disabled>Set center</button>
+        <button id="arm" aria-pressed="false" disabled>Enable face steering</button>
+      </div>
+      <p class="help">Face the camera and select Set center. Move your face left or right to steer.</p>
+      <p class="help" id="state" role="status">Face steering is off.</p>
+    </section>
+    <section>
+      <h2>Steering</h2>
+      <div class="actions"><button id="usb">Connect Red Board</button></div>
+      <dl>
+        <dt>Target</dt><dd id="target">—</dd>
+        <dt>Rover heading</dt><dd id="heading">—</dd>
+        <dt>Front distance</dt><dd id="distance">—</dd>
+      </dl>
+      <div class="drive">
+        <button data-drive="forward" disabled>Forward</button>
+        <button data-drive="left" disabled>Left</button>
+        <button id="stop" disabled>Stop</button>
+        <button data-drive="right" disabled>Right</button>
+        <button data-drive="reverse" disabled>Reverse</button>
+      </div>
+      <p class="help">Hold a direction to drive manually. Release to stop.</p>
+      <div class="actions voice"><button id="voice" aria-pressed="false">Enable voice</button></div>
+      <p id="heard" class="help" role="status">Say “go forward,” “reverse,” “turn left,” “turn right,” or “stop.”</p>
+    </section>
+  </div>
+</main>
+<script>
+  const find = id => document.getElementById(id);
+  const video = find("video");
+  const canvas = find("overlay");
+  const context = canvas.getContext("2d");
+  const cameraButton = find("camera");
+  const centerButton = find("center");
+  const armButton = find("arm");
+  const voiceButton = find("voice");
+  const driveButtons = [...document.querySelectorAll("[data-drive]")];
+  const STOP = "stop";
+  const VOICE_MS = 1600;
+  const FACE_MAX_AGE_MS = 300;
+  const MEDIAPIPE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
+  const MODEL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
+  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  class RedBoardConnection {
+    ready = false;
+    pending = 0;
+    session = null;
+
+    get bufferedAmount() {
+      return this.pending;
+    }
+
+    async connect() {
+      if (this.session) return;
+      // requestPort must run from the Connect button's click.
+      const port = await navigator.serial.requestPort();
+      const session = {port, closing: false, pending: 0};
+      this.session = session;
+      try {
+        await port.open({baudRate: 115200});
+        session.reader = port.readable.getReader();
+        session.writer = port.writable.getWriter();
+        session.onDisconnect = () => {
+          void this.close(session, "USB disconnected. Connect the Red Board again.");
+        };
+        port.addEventListener("disconnect", session.onDisconnect);
+        session.reading = this.read(session);
+        await port.setSignals({dataTerminalReady: true});
+        await this.delay(750);
+        await this.write(session, "\x03\x03\x02");
+        await this.delay(300);
+        await this.exchange(
+          session, "exec(open('/lookout_face_control.py').read())\r", "READY_FACE", 3000,
+        );
+        await this.exchange(session, "PING\n", "PONG", 1500);
+        if (session.closing) throw new Error("USB disconnected");
+        this.ready = true;
+        this.onopen?.();
+      } catch (error) {
+        await this.close(session);
+        throw error;
+      }
+    }
+
+    delay(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async write(session, text) {
+      if (session.closing || !session.writer) throw new Error("USB disconnected");
+      session.pending++;
+      this.pending = session.pending;
+      try {
+        await session.writer.write(new TextEncoder().encode(text));
+      } finally {
+        session.pending--;
+        if (this.session === session) this.pending = session.pending;
+      }
+    }
+
+    async exchange(session, command, expected, timeout) {
+      const reply = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          session.waiter = null;
+          const detail = session.lastLine ? " Last reply: " + session.lastLine : "";
+          reject(new Error("The board did not reply " + expected + "." + detail));
+        }, timeout);
+        session.waiter = {
+          expected,
+          finish(error) {
+            clearTimeout(timer);
+            session.waiter = null;
+            if (error) reject(error);
+            else resolve();
+          },
+        };
+      });
+      await Promise.all([reply, this.write(session, command)]);
+    }
+
+    async read(session) {
+      let buffer = "";
+      const decoder = new TextDecoder();
+      try {
+        while (!session.closing) {
+          const {value, done} = await session.reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, {stream: true});
+          let end;
+          while ((end = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, end).trim();
+            buffer = buffer.slice(end + 1);
+            if (line) this.process(session, line);
+          }
+          if (buffer.length > 4096) buffer = buffer.slice(-4096);
+        }
+      } catch (_) {
+        // The serial port can disappear when power or USB is removed.
+      } finally {
+        session.reader.releaseLock();
+      }
+      if (!session.closing) void this.close(session, "USB disconnected. Connect the Red Board again.");
+    }
+
+    process(session, line) {
+      session.lastLine = line;
+      if (session.waiter?.expected === line) {
+        session.waiter.finish();
+        return;
+      }
+      if (!this.ready || session.closing || this.session !== session) return;
+      if (line === "ZEROED") {
+        this.onmessage?.({data: JSON.stringify({kind: "armed"})});
+      } else if (line.startsWith("STATUS ")) {
+        const [, headingText, distanceText] = line.split(/\s+/);
+        const heading = Number(headingText);
+        const distance = distanceText === "NA" ? null : Number(distanceText);
+        if (!Number.isFinite(heading) || (distance !== null && !Number.isFinite(distance))) return;
+        this.onmessage?.({data: JSON.stringify({kind: "status", heading, distance})});
+      }
+    }
+
+    send(payload) {
+      if (!this.ready || !this.session) return;
+      const session = this.session;
+      const message = JSON.parse(payload);
+      const commands = {
+        forward: "DRIVE 0.28 0.28\n", reverse: "DRIVE -0.28 -0.28\n",
+        left: "DRIVE -0.28 0.28\n", right: "DRIVE 0.28 -0.28\n",
+        stop: "STOP\n", disarm: "STOP\n", arm: "STOP\nZERO\n", status: "STATUS\n",
+      };
+      let command;
+      if (message.kind === "aim") {
+        const {angle, base} = message;
+        if (!Number.isFinite(angle) || !Number.isFinite(base)
+            || Math.abs(angle) > 45 || Math.abs(base) > 0.28) return;
+        command = "AIM " + angle.toFixed(1) + " " + base.toFixed(2) + "\n";
+      } else if (Object.hasOwn(commands, message.kind)) {
+        command = commands[message.kind];
+      }
+      if (command) {
+        void this.write(session, command).catch(() => {
+          void this.close(session, "USB connection was lost.");
+        });
+      }
+    }
+
+    async close(session, message) {
+      if (session.closing) return;
+      session.closing = true;
+      const wasReady = this.ready;
+      this.ready = false;
+      session.waiter?.finish(new Error("USB disconnected"));
+      if (message || wasReady) this.onclose?.(message);
+
+      if (session.reader) {
+        try { await session.reader.cancel(); } catch (_) {}
+        try { await session.reading; } catch (_) {}
+      }
+      if (session.writer) {
+        // This takes priority after any already submitted serial frame.
+        if (wasReady && session.pending === 0) {
+          try { await session.writer.write(new TextEncoder().encode("STOP\n")); } catch (_) {}
+        }
+        try { session.writer.releaseLock(); } catch (_) {}
+      }
+      if (session.onDisconnect) session.port.removeEventListener("disconnect", session.onDisconnect);
+      try { await session.port.close(); } catch (_) {}
+      if (this.session === session) {
+        this.session = null;
+        this.pending = 0;
+      }
+    }
+  }
+
+  const socket = new RedBoardConnection();
+
+  let stream, detector, face, center, manual, voiceAction, recognition;
+  let armed = false;
+  let waitingForArm = false;
+  let trackingBusy = false;
+  let voiceEnabled = false;
+  let lastFrame = -1;
+  let lastDetectionTime = 0;
+  let targetAngle = 0;
+  let headingOffset = 0;
+  let lastStatus = 0;
+  let distance = null;
+
+  const clip = (number, min, max) => Math.min(max, Math.max(min, number));
+  const degrees = value => Math.abs(value) < 1 ? "0° · center"
+    : Math.round(Math.abs(value)) + (value > 0 ? "° left" : "° right");
+  const connected = () => socket.ready;
+  const faceFresh = () => face && performance.now() - face.time < FACE_MAX_AGE_MS;
+  const effectiveTarget = () => clip(headingOffset + targetAngle, -45, 45);
+
+  function send(kind, fields = {}) {
+    if (connected()) socket.send(JSON.stringify({kind, ...fields}));
+  }
+
+  function updateControls() {
+    centerButton.disabled = !faceFresh();
+    armButton.disabled = !connected() || waitingForArm || (!armed && (!faceFresh() || center == null));
+    armButton.textContent = armed ? "Disable face steering" : "Enable face steering";
+    armButton.setAttribute("aria-pressed", String(armed));
+    find("stop").disabled = !connected();
+    driveButtons.forEach(button => button.disabled = !connected());
+  }
+
+  function stopManual() {
+    if (manual) manual.button.classList.remove("active");
+    manual = null;
+    send(STOP);
+  }
+
+  function disarm(message) {
+    armed = false;
+    waitingForArm = false;
+    voiceAction = null;
+    stopManual();
+    send("disarm");
+    find("state").textContent = message;
+    updateControls();
+  }
+
+  function aimFromFace() {
+    if (center == null || !faceFresh()) return 0;
+    const offset = (center - face.x) / Math.max(0.12, face.width);
+    const adjusted = Math.sign(offset) * Math.max(0, Math.abs(offset) - 0.07);
+    return clip(adjusted * 70, -45, 45);
+  }
+
+  function clearVoice() {
+    voiceAction = null;
+    send(STOP);
+  }
+
+  function controlTick() {
+    const now = performance.now();
+    if (!connected() || document.hidden) return;
+    updateControls();
+    if ((armed || waitingForArm) && !faceFresh()) {
+      disarm("Face lost. Center yourself, then enable steering again.");
+      return;
+    }
+    if (now - lastStatus >= 350 && socket.bufferedAmount === 0) {
+      send("status");
+      lastStatus = now;
+    }
+    if (socket.bufferedAmount !== 0) return;
+    if (manual) {
+      send(manual.button.dataset.drive);
+      return;
+    }
+    if (!armed) return;
+
+    if (voiceAction && voiceAction.until <= now) clearVoice();
+    const base = voiceAction?.base ?? 0;
+    const angle = effectiveTarget();
+    if (base > 0 && (distance === null || distance < 20)) {
+      clearVoice();
+      find("heard").textContent = distance === null
+        ? "Forward stopped · no usable front distance."
+        : "Forward stopped · obstacle ahead.";
+      return;
+    }
+    send("aim", {angle, base});
+  }
+
+  const usbButton = find("usb");
+  socket.onopen = () => {
+    usbButton.textContent = "Red Board connected";
+    usbButton.disabled = true;
+    find("connection").textContent = "Red Board connected";
+    updateControls();
+  };
+  socket.onclose = error => {
+    disarm("Connection closed. Use Connect Red Board to reconnect.");
+    distance = null;
+    find("heading").textContent = "—";
+    find("distance").textContent = "—";
+    usbButton.textContent = "Connect Red Board";
+    usbButton.disabled = false;
+    find("connection").textContent = error || "Disconnected";
+  };
+
+  if (!window.isSecureContext || !("serial" in navigator)) {
+    usbButton.disabled = true;
+    find("connection").textContent = "Open the HTTPS page directly in desktop Chrome or Edge.";
+  } else {
+    usbButton.addEventListener("click", async () => {
+      usbButton.disabled = true;
+      find("connection").textContent = "Connecting to the Red Board…";
+      try {
+        await socket.connect();
+      } catch (error) {
+        find("connection").textContent = "USB: " + error.message;
+        usbButton.disabled = false;
+      }
+    });
+  }
+  socket.onmessage = event => {
+    const message = JSON.parse(event.data);
+    if (message.kind === "armed") {
+      if (!waitingForArm || !faceFresh() || document.hidden || Math.abs(aimFromFace()) > 3) {
+        disarm("Face steering is off.");
+        return;
+      }
+      waitingForArm = false;
+      armed = true;
+      find("state").textContent = "Face steering enabled.";
+      updateControls();
+    } else if (message.kind === "status") {
+      find("heading").textContent = degrees(message.heading);
+      distance = message.distance;
+      find("distance").textContent = distance === null ? "No echo" : distance.toFixed(1) + " cm";
+    }
+  };
+
+  function drawFace(box) {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (box) {
+      context.strokeStyle = "#a5ecc5";
+      context.lineWidth = 3;
+      context.strokeRect(canvas.width - box.originX - box.width, box.originY, box.width, box.height);
+    }
+    if (center != null) {
+      const x = center * canvas.width;
+      context.strokeStyle = "#f0d492";
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(x, 0);
+      context.lineTo(x, canvas.height);
+      context.stroke();
+    }
+  }
+
+  function track(now) {
+    if (!stream) return;
+    requestAnimationFrame(track);
+    if (!detector || video.readyState < 2 || video.currentTime === lastFrame || now - lastDetectionTime < 65) return;
+    lastFrame = video.currentTime;
+    lastDetectionTime = now;
+    let detections;
+    try {
+      detections = detector.detectForVideo(video, now).detections;
+    } catch (error) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+      face = null;
+      center = null;
+      lastFrame = -1;
+      cameraButton.disabled = false;
+      cameraButton.textContent = "Enable camera";
+      find("camera-note").hidden = false;
+      find("camera-note").textContent = "Face tracking stopped: " + error.message;
+      disarm("Face tracking stopped.");
+      return;
+    }
+    const box = detections.length === 1 ? detections[0].boundingBox : null;
+    if (!box) {
+      face = null;
+      if (armed || waitingForArm) disarm("Keep one face visible. Enable steering again when ready.");
+      find("target").textContent = "—";
+      drawFace(null);
+      updateControls();
+      return;
+    }
+    face = {x: 1 - (box.originX + box.width / 2) / video.videoWidth,
+            width: box.width / video.videoWidth, time: now};
+    targetAngle += 0.40 * (aimFromFace() - targetAngle);
+    find("target").textContent = center == null ? "Set center" : degrees(effectiveTarget());
+    drawFace(box);
+    updateControls();
+  }
+
+  cameraButton.addEventListener("click", async () => {
+    if (trackingBusy || stream) return;
+    trackingBusy = true;
+    cameraButton.disabled = true;
+    find("camera-note").textContent = "Starting camera and loading face tracking…";
+    try {
+      const {FaceDetector, FilesetResolver} = await import(MEDIAPIPE + "/vision_bundle.mjs");
+      const assets = await FilesetResolver.forVisionTasks(MEDIAPIPE + "/wasm");
+      detector = await FaceDetector.createFromOptions(assets, {
+        baseOptions: { modelAssetPath: MODEL }, runningMode: "VIDEO", minDetectionConfidence: 0.6,
+      });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false, video: { facingMode: "user", width: {ideal: 640}, height: {ideal: 400} },
+      });
+      video.srcObject = stream;
+      await video.play();
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      find("camera-note").hidden = true;
+      cameraButton.textContent = "Camera on";
+      stream.getVideoTracks()[0].addEventListener("ended", () => {
+        stream = null;
+        face = null;
+        center = null;
+        lastFrame = -1;
+        cameraButton.disabled = false;
+        cameraButton.textContent = "Enable camera";
+        find("camera-note").hidden = false;
+        find("camera-note").textContent = "Camera disconnected.";
+        disarm("Camera disconnected. Face steering stopped.");
+      });
+      requestAnimationFrame(track);
+    } catch (error) {
+      if (stream) stream.getTracks().forEach(track => track.stop());
+      stream = null;
+      find("camera-note").textContent = "Camera or tracking could not start: " + error.message;
+      cameraButton.disabled = false;
+    } finally {
+      trackingBusy = false;
+    }
+  });
+
+  centerButton.addEventListener("click", () => {
+    if (!faceFresh()) return;
+    disarm("Center set. Enable face steering when ready.");
+    center = face.x;
+    targetAngle = 0;
+    headingOffset = 0;
+    find("target").textContent = degrees(0);
+    updateControls();
+  });
+  armButton.addEventListener("click", () => {
+    if (armed) {
+      disarm("Face steering is off.");
+    } else if (center != null && faceFresh() && connected()) {
+      if (Math.abs(aimFromFace()) > 3) {
+        find("state").textContent = "Move back to the center line, then enable steering.";
+        return;
+      }
+      headingOffset = 0;
+      targetAngle = 0;
+      waitingForArm = true;
+      send("arm");
+      find("state").textContent = "Setting the rover's center heading…";
+      updateControls();
+    }
+  });
+  find("stop").addEventListener("click", () => disarm("Stopped. Enable face steering to resume."));
+
+  driveButtons.forEach(button => {
+    button.addEventListener("pointerdown", event => {
+      if (!event.isPrimary || event.button !== 0 || !connected()) return;
+      disarm("Manual control. Enable face steering to resume tracking.");
+      button.setPointerCapture(event.pointerId);
+      manual = { button, id: event.pointerId };
+      button.classList.add("active");
+      send(button.dataset.drive);
+    });
+    for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      button.addEventListener(name, event => {
+        if (manual?.id === event.pointerId) stopManual();
+      });
+    }
+    button.addEventListener("keydown", event => {
+      if (event.key !== " " && event.key !== "Enter") return;
+      event.preventDefault();
+      if (event.repeat || !connected()) return;
+      disarm("Manual control. Enable face steering to resume tracking.");
+      manual = { button, id: null };
+      button.classList.add("active");
+      send(button.dataset.drive);
+    });
+    button.addEventListener("keyup", event => {
+      if ((event.key === " " || event.key === "Enter") && manual?.button === button) stopManual();
+    });
+    button.addEventListener("blur", () => {
+      if (manual?.button === button) stopManual();
+    });
+  });
+
+  if (!Speech) {
+    voiceButton.disabled = true;
+    find("heard").textContent = "Open this page in Chrome for voice commands.";
+  } else {
+    recognition = new Speech();
+    recognition.lang = "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onstart = () => {
+      voiceButton.textContent = "Voice on";
+      voiceButton.setAttribute("aria-pressed", "true");
+      find("heard").textContent = "Listening…";
+    };
+    recognition.onerror = event => {
+      if (event.error === "no-speech") return;
+      voiceEnabled = false;
+      disarm("Voice stopped.");
+      find("heard").textContent = "Voice error: " + event.error;
+    };
+    recognition.onend = () => {
+      if (voiceEnabled && !document.hidden) {
+        setTimeout(() => {
+          if (voiceEnabled && !document.hidden) {
+            try { recognition.start(); } catch (_) {}
+          }
+        }, 350);
+      } else {
+        voiceButton.textContent = "Enable voice";
+        voiceButton.setAttribute("aria-pressed", "false");
+      }
+    };
+    recognition.onresult = event => {
+      if (!voiceEnabled || document.hidden) return;
+      for (let index = event.resultIndex; index < event.results.length; index++) {
+        const result = event.results[index];
+        const raw = result[0].transcript;
+        const words = raw.toLowerCase().replace(/[^a-z ]/g, "").trim().replace(/ +/g, " ");
+        const isStop = /^(?:(?:rover|please) )?(?:stop|halt)(?: (?:now|rover|please))?$/.test(words);
+        if (isStop) {
+          disarm("Voice stop received. Enable face steering to resume.");
+          find("heard").textContent = "Heard: " + raw;
+          return;
+        }
+        if (!result.isFinal) continue;
+        const intent = {
+          "go forward": {base: .25}, "forward": {base: .25},
+          "move forward": {base: .25}, "reverse": {base: -.22}, "back up": {base: -.22},
+          "turn left": {turn: 25}, "left": {turn: 25},
+          "turn right": {turn: -25}, "right": {turn: -25},
+        };
+        const command = words.replace(/^(?:rover|please) /, "");
+        const action = Object.hasOwn(intent, command) ? intent[command] : null;
+        find("heard").textContent = "Heard: " + raw;
+        if (!action || !armed || !faceFresh()) continue;
+        if (action.turn !== undefined) {
+          if (voiceAction) clearVoice();
+          headingOffset = clip(headingOffset + action.turn, -45, 45);
+        } else {
+          voiceAction = {...action, until: performance.now() + VOICE_MS};
+        }
+        find("heard").textContent = "Command: " + command;
+      }
+    };
+    voiceButton.addEventListener("click", () => {
+      if (voiceEnabled) {
+        voiceEnabled = false;
+        recognition.abort();
+        disarm("Voice turned off. Face steering paused.");
+        find("heard").textContent = "Voice is off.";
+        return;
+      }
+      voiceEnabled = true;
+      try { recognition.start(); }
+      catch (error) {
+        voiceEnabled = false;
+        find("heard").textContent = error.message;
+      }
+    });
+  }
+
+  window.addEventListener("blur", () => disarm("Focus lost. Face steering stopped."));
+  window.addEventListener("pagehide", () => disarm("Page closed."));
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") disarm("Stopped. Enable face steering to resume.");
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) disarm("Page hidden. Face steering stopped.");
+  });
+  setInterval(controlTick, 100);
+</script>
+</body>
+</html>
