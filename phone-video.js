@@ -28,7 +28,7 @@
 
   function bookmark(value, base) {
     const url = new URL("rover-phone.html", base);
-    url.searchParams.set("v", "2");
+    url.searchParams.set("v", "3");
     url.hash = new URLSearchParams({id: value.id, key: value.token}).toString();
     return url.href;
   }
@@ -43,11 +43,13 @@
     // Prefer direct WebRTC; VDO.Ninja falls back to TURN automatically.
     // Forcing relay-only prevented negotiation on otherwise working networks.
     if (sender) {
+      url.searchParams.set("forcelandscape", "1");
       url.searchParams.set("webcam", "1");
       url.searchParams.set("autostart", "1");
       url.searchParams.set("facing", "rear");
       url.searchParams.set("audiodevice", "0");
     } else {
+      url.searchParams.set("forceviewerlandscape", "1");
       url.searchParams.set("clean", "1");
       url.searchParams.set("noaudio", "1");
     }
