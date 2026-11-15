@@ -188,6 +188,12 @@ summary { cursor: pointer; width: fit-content; }
 .camera-tabs button[aria-selected='true'] { border-color: #77678a; color: #f5f3fc; background: #34284e; }
 .camera-views { position: relative; }
 .camera-view[data-active='false'] { position: absolute; inset: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.camera-views[data-view='phone'][data-steering='true'] { display: grid; }
+.camera-views[data-view='phone'][data-steering='true'] #laptop-panel {
+  position: static; visibility: visible; grid-row: 2; justify-self: end;
+  width: min(32%, 220px); margin-top: 12px;
+}
+.camera-views[data-view='phone'] #laptop-panel .camera-note { display: none; }
 .camera-view [hidden], .camera-heading [hidden] { display: none !important; }
 .camera-note button { margin-top: 1rem; min-height: 44px; padding: .5rem .85rem; }
 #phone-badge { color: var(--muted); font-size: clamp(14px, 1.45vw, 20px); }
@@ -221,7 +227,7 @@ summary { cursor: pointer; width: fit-content; }
         </div>
         <span id="tracking-status">Camera off</span><span id="phone-badge" hidden>Phone offline</span>
       </div>
-      <div class="camera-views">
+      <div class="camera-views" id="camera-views" data-view="laptop">
         <div class="camera-view" id="laptop-panel" role="tabpanel" aria-labelledby="laptop-tab" data-active="true">
           <div class="camera">
             <div id="camera-note" class="camera-note"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="12" width="26" height="24" rx="5"/><path d="m32 20 10-6v20l-10-6"/></svg><strong id="camera-empty-title">Camera off</strong><p id="camera-instruction">Start the laptop camera to preview it here.</p><button id="laptop-preview" type="button">Start laptop camera</button></div>
@@ -608,7 +614,6 @@ summary { cursor: pointer; width: fit-content; }
   const TRACK_MS = 16;
   const MEDIAPIPE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
   const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
-  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   let enabled = false, connecting = false;
   let generation = 0;
@@ -617,6 +622,7 @@ summary { cursor: pointer; width: fit-content; }
   let cameraRequest = null, cameraEpoch = 0;
   let trackingError = "", voiceLabel = "Mic off";
   let voicePackInstalling = false;
+  let trackingFrame = null, trackingInFlight = null;
   let face, previousFrame = -1, lastSample = 0, calibration = [], neutral = null;
   let filteredYaw = 0, faceAngle = 0, faceRate = 0, lastControlPose = 0, yawOffset = 0;
   let latestStatus = null, lastPoll = 0, lastMotionAt = 0, lastMotion = "";
@@ -874,8 +880,8 @@ summary { cursor: pointer; width: fit-content; }
     };
   }
 
-  async function makeTracker() {
-    if (window.Worker && window.OffscreenCanvas && window.createImageBitmap) {
+  async function makeTracker(useWorker, useGpu) {
+    if (useWorker && window.Worker && window.OffscreenCanvas && window.createImageBitmap) {
       const blob = new Blob([
         poseOf.toString(), "\n", loadModel.toString(), "\n(", trackingWorker.toString(), ")();"
       ], {type: "text/javascript"});
@@ -898,6 +904,7 @@ summary { cursor: pointer; width: fit-content; }
         });
         await ask({kind: "start", bundle: MEDIAPIPE, asset: MODEL}, [], 12000);
         return {
+          canFallBack: true,
           close: () => worker.terminate(),
           async predict(at) {
             const frame = await createImageBitmap(video);
@@ -910,8 +917,12 @@ summary { cursor: pointer; width: fit-content; }
         URL.revokeObjectURL(url);
       }
     }
-    const model = await loadModel(MEDIAPIPE, MODEL, true);
-    return {close: () => model.close(), predict: at => poseOf(model.detectForVideo(video, at))};
+    const model = await loadModel(MEDIAPIPE, MODEL, useGpu);
+    return {
+      canFallBack: useGpu,
+      close: () => model.close(),
+      predict: at => poseOf(model.detectForVideo(video, at)),
+    };
   }
 
   function draw(box) {
@@ -966,36 +977,59 @@ summary { cursor: pointer; width: fit-content; }
     lastControlPose = at;
   }
 
+  function scheduleTracking(token) {
+    if (trackingFrame !== null || trackingInFlight === token ||
+        !enabled || hidden || token !== generation || !stream || !tracker) return;
+    // The laptop stream drives steering in either camera view. A callback
+    // tied to that video's compositor can stop when the view changes.
+    trackingFrame = requestAnimationFrame(() => {
+      trackingFrame = null;
+      void track(token);
+    });
+  }
+
+  function cancelTrackingFrame() {
+    if (trackingFrame === null) return;
+    cancelAnimationFrame(trackingFrame);
+    trackingFrame = null;
+  }
+
   async function track(token) {
-    if (!enabled || generation !== token || !stream) return;
+    if (!enabled || hidden || generation !== token || !stream || !tracker) return;
+    const camera = stream;
+    const currentTracker = tracker;
     const at = performance.now();
-    if (!hidden && tracker && video.readyState >= 2 && video.currentTime !== previousFrame && at - lastSample >= TRACK_MS) {
-      previousFrame = video.currentTime;
+    const mediaTime = video.currentTime;
+    if (video.readyState >= 2 && !video.paused && mediaTime !== previousFrame && at - lastSample >= TRACK_MS) {
+      previousFrame = mediaTime;
       lastSample = at;
+      trackingInFlight = token;
       try {
-        const pose = await tracker.predict(at);
-        if (enabled && generation === token) {
+        const pose = await currentTracker.predict(at);
+        if (enabled && generation === token && stream === camera && !hidden) {
           acceptPose(pose, at);
           step();
         }
       } catch (_) {
-        if (generation !== token) return;
-        trackingError = "Face tracking restarting";
+        if (generation !== token || stream !== camera) return;
+        const retryOnCpu = currentTracker.canFallBack;
+        trackingError = retryOnCpu ? "Face tracking restarting" : "Face tracking failed · toggle steering to retry";
         face = null;
         stopMotion();
-        if (tracker) tracker.close();
+        currentTracker.close();
         tracker = null;
-        await delay(300);
-        if (enabled && generation === token) await prepareTracker(token);
+        if (retryOnCpu) await prepareTracker(token, false, false);
+      } finally {
+        if (trackingInFlight === token) trackingInFlight = null;
       }
     }
-    if (enabled && generation === token) requestAnimationFrame(() => void track(token));
+    scheduleTracking(token);
   }
 
-  async function prepareTracker(token) {
+  async function prepareTracker(token, useWorker = true, useGpu = true) {
     try {
-      const result = await makeTracker();
-      if (generation === token && enabled) {
+      const result = await makeTracker(useWorker, useGpu);
+      if (generation === token && enabled && stream) {
         tracker = result;
         trackingError = "";
       } else {
@@ -1278,6 +1312,7 @@ summary { cursor: pointer; width: fit-content; }
 
   function disable() {
     enabled = false;
+    updateCameraView();
     generation++;
     discardVoiceDraft();
     lastFinalVoiceIndex = lastInterimVoiceIndex = ignoredVoiceIndex = -1;
@@ -1297,6 +1332,7 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function releaseLaptopCamera() {
+    cancelTrackingFrame();
     cameraEpoch++;
     cameraRequest = null;
     const camera = stream;
@@ -1362,6 +1398,7 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function showCamera(name) {
+    byId("camera-views").dataset.view = name;
     for (const view of ["laptop", "phone"]) {
       const active = view === name;
       const tab = byId(view + "-tab");
@@ -1372,13 +1409,27 @@ summary { cursor: pointer; width: fit-content; }
       panel.setAttribute("aria-hidden", String(!active));
       panel.inert = !active;
     }
-    byId("tracking-status").hidden = name !== "laptop";
     byId("phone-badge").hidden = name !== "phone";
+    updateCameraView();
+    resumeTracking();
+  }
+
+  function resumeTracking() {
+    if (!enabled || hidden || !stream) return;
+    if (video.paused) void video.play().catch(() => {});
+    scheduleTracking(generation);
+  }
+
+  function updateCameraView() {
+    const views = byId("camera-views");
+    views.dataset.steering = String(enabled);
+    byId("tracking-status").hidden = views.dataset.view === "phone" && !enabled;
   }
 
   async function enable() {
     if (!socket.ready || enabled) return;
     enabled = true;
+    updateCameraView();
     const token = ++generation;
     face = null;
     voiceStop = false;
@@ -1390,7 +1441,7 @@ summary { cursor: pointer; width: fit-content; }
       const camera = await openLaptopCamera();
       if (!camera || !enabled || generation !== token) return;
       await prepareTracker(token);
-      if (enabled && generation === token) requestAnimationFrame(() => void track(token));
+      if (enabled && generation === token && stream && tracker) scheduleTracking(token);
     } catch (_) {
       if (generation !== token) return;
       trackingError = "Camera permission denied or unavailable";
@@ -1447,8 +1498,12 @@ summary { cursor: pointer; width: fit-content; }
   document.addEventListener("visibilitychange", () => {
     hidden = document.hidden;
     if (hidden) {
+      cancelTrackingFrame();
+      face = null;
       discardVoiceDraft();
       stopMotion();
+    } else {
+      resumeTracking();
     }
     render();
   });
