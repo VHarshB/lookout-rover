@@ -349,12 +349,16 @@ summary { cursor: pointer; width: fit-content; }
 
     async writeBluetooth(session, bytes, closingStop = false) {
       // Conservative packet size avoids assuming a negotiated MTU. One write at a time.
+      const acknowledge = closingStop || new TextDecoder().decode(bytes).includes("STOP");
       for (let offset = 0; offset < bytes.length; offset += 20) {
         if ((session.closing && !closingStop) || !session.device.gatt.connected) {
           throw new Error("Bluetooth disconnected");
         }
+        const fast = this.ready && !acknowledge && session.transmit.properties?.writeWithoutResponse
+          && typeof session.transmit.writeValueWithoutResponse === "function";
+        const chunk = bytes.subarray(offset, offset + 20);
         await this.withTimeout(
-          session.transmit.writeValueWithResponse(bytes.subarray(offset, offset + 20)),
+          fast ? session.transmit.writeValueWithoutResponse(chunk) : session.transmit.writeValueWithResponse(chunk),
           450, "Bluetooth write timed out",
         );
       }
@@ -365,6 +369,7 @@ summary { cursor: pointer; width: fit-content; }
       const bytes = new TextEncoder().encode(text);
       session.pending++;
       this.pending = session.pending;
+      let completed = false;
       try {
         if (session.device) {
           const operation = session.queue.then(() => this.writeBluetooth(session, bytes));
@@ -374,9 +379,15 @@ summary { cursor: pointer; width: fit-content; }
         } else {
           await session.writer.write(bytes);
         }
+        completed = true;
       } finally {
         session.pending--;
-        if (this.session === session) this.pending = session.pending;
+        if (this.session === session) {
+          this.pending = session.pending;
+          if (completed && this.ready && !session.closing && !session.pending) {
+            queueMicrotask(() => this.onwritable?.());
+          }
+        }
       }
     }
 
@@ -464,7 +475,11 @@ summary { cursor: pointer; width: fit-content; }
         if (!Number.isFinite(angle) || !Number.isFinite(base) || !Number.isFinite(rate)
             || Math.abs(angle) > maxAngle || Math.abs(base) > 0.28 || Math.abs(rate) > 180) return;
         const speed = this.version === 2 ? " " + rate.toFixed(0) : "";
-        command = "AIM " + angle.toFixed(1) + " " + base.toFixed(2) + speed + "\n";
+        // BLE's default payload is 20 bytes. Trim padding, not precision, to avoid
+        // paying a second connection interval for ordinary steering frames.
+        const angleText = session.device ? String(Number(angle.toFixed(1))) : angle.toFixed(1);
+        const baseText = session.device ? String(Number(base.toFixed(2))) : base.toFixed(2);
+        command = "AIM " + angleText + " " + baseText + speed + "\n";
       } else if (Object.hasOwn(commands, message.kind)) {
         command = commands[message.kind];
       }
@@ -532,7 +547,7 @@ summary { cursor: pointer; width: fit-content; }
   const FACE_TIMEOUT = 240;
   const VOICE_DURATION = 1600;
   const QUICK_VOICE_CONFIRM = 1100;
-  const TRACK_MS = 33;
+  const TRACK_MS = 16;
   const MEDIAPIPE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
   const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -675,7 +690,10 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function step(now = performance.now(), voiceUpdate = false) {
-    if (!voiceUpdate && socket.ready && now - lastPoll >= 165 && socket.bufferedAmount === 0) {
+    // Fresh movement gets the next free BLE slot. Once a poll is 250 ms due,
+    // reserve the next free slot for telemetry; stale-data limits stay unchanged.
+    if (!voiceUpdate && socket.ready && now - lastPoll >= 165 && socket.bufferedAmount === 0
+        && (!canMove(now) || now - lastPoll >= 250 || now - lastMotionAt < 31)) {
       send("status");
       lastPoll = now;
     }
@@ -871,7 +889,10 @@ summary { cursor: pointer; width: fit-content; }
 
     const raw = angleDelta(pose.yaw - neutral);
     const dt = lastControlPose ? Math.max(12, at - lastControlPose) : TRACK_MS;
-    const alpha = Math.abs(raw - filteredYaw) > 4 ? 0.78 : 0.45;
+    // Time-based smoothing follows quick turns/reversals without the old tail,
+    // while still damping small steady-pose jitter at any camera frame rate.
+    const responseMs = Math.abs(raw - filteredYaw) > 4 ? 12 : 35;
+    const alpha = 1 - Math.exp(-dt / responseMs);
     filteredYaw += alpha * (raw - filteredYaw);
     const next = Math.abs(filteredYaw) < 2 ? 0 : clamp(filteredYaw, MAX_YAW);
     const rate = dt > FACE_TIMEOUT ? 0 : clamp((next - faceAngle) * 1000 / dt, MAX_RATE);
@@ -1227,7 +1248,7 @@ summary { cursor: pointer; width: fit-content; }
     try {
       const camera = await navigator.mediaDevices.getUserMedia({
         audio: false,
-        video: {facingMode: "user", width: {ideal: 640}, height: {ideal: 400}, frameRate: {ideal: 30}},
+        video: {facingMode: "user", width: {ideal: 640}, height: {ideal: 400}, frameRate: {ideal: 60, max: 60}},
       });
       if (!enabled || generation !== token) {
         camera.getTracks().forEach(track => track.stop());
@@ -1257,6 +1278,7 @@ summary { cursor: pointer; width: fit-content; }
     }
   }
 
+  socket.onwritable = () => step();
   socket.onopen = () => {
     latestStatus = null;
     const detail = socket.version === 2 ? socket.session.label : "controller update available";
