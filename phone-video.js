@@ -18,9 +18,9 @@
     } catch (_) { return null; }
   }
 
-  function createPairing() {
+  function createPairing(fresh = false) {
     const existing = savedPairing();
-    if (existing) return existing;
+    if (existing && !fresh) return existing;
     const value = {id: "lookout-" + crypto.randomUUID(), token: crypto.randomUUID()};
     window.localStorage.setItem(storageKey, JSON.stringify(value));
     return value;
@@ -28,7 +28,7 @@
 
   function bookmark(value, base) {
     const url = new URL("rover-phone.html", base);
-    url.searchParams.set("v", "4");
+    url.searchParams.set("v", "5");
     url.hash = new URLSearchParams({id: value.id, key: value.token}).toString();
     return url.href;
   }

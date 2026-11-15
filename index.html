@@ -272,6 +272,7 @@ summary { cursor: pointer; width: fit-content; }
             <p id="phone-status" role="status">Create a phone link or reopen your bookmarked link.</p>
             <div class="phone-actions">
               <button id="phone-pair" type="button">Create phone link</button>
+              <button id="phone-reset" type="button">Create fresh phone link</button>
               <button id="phone-reload" type="button" hidden>Reload viewer</button>
             </div>
             <div id="phone-pair-link" hidden>
@@ -286,7 +287,7 @@ summary { cursor: pointer; width: fit-content; }
 </main>
 <aside id="mascot" aria-label="Hoot rover companion"></aside>
 <script defer src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-<script defer src="phone-video.js?v=4"></script>
+<script defer src="phone-video.js?v=5"></script>
 <script>
   // The XRP's Bluetooth REPL uses the Nordic UART service.
   const XRP_UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
@@ -1561,6 +1562,12 @@ summary { cursor: pointer; width: fit-content; }
     pair.addEventListener("click", () => {
       try { showViewer(api.createPairing()); }
       catch (_) { status.textContent = "Allow site storage in this browser to save the phone link."; }
+    });
+    byId("phone-reset").addEventListener("click", () => {
+      try {
+        showViewer(api.createPairing(true));
+        status.textContent = "Fresh link created. Close old Ninja tabs on your phone, then scan this QR code once. Old bookmarks no longer connect to this viewer.";
+      } catch (_) { status.textContent = "Allow site storage to create a fresh phone link."; }
     });
     byId("phone-copy").addEventListener("click", async () => {
       const input = byId("phone-url");
