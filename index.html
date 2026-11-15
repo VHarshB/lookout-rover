@@ -37,13 +37,9 @@
   #state { margin-top: .5rem; min-height: 2.4em; }
   dl { display: grid; grid-template-columns: 1fr auto; gap: .45rem; margin: .8rem 0; }
   dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
-  .drive { display: grid; grid-template-areas: ". forward ." "left stop right" ". reverse .";
-    grid-template-columns: repeat(3, 1fr); gap: .4rem; margin-top: .65rem; }
-  [data-drive="forward"] { grid-area: forward; }
-  [data-drive="reverse"] { grid-area: reverse; }
-  [data-drive="left"] { grid-area: left; }
-  [data-drive="right"] { grid-area: right; }
-  .voice { margin: .95rem 0 .25rem; }
+  #usb[hidden] { display: none; }
+  #state { color: #f1f6f3; font-size: 1.08rem; font-weight: 650; min-height: 1.5em; }
+  #voice-state { font-size: .85rem; }
   #heard { overflow-wrap: anywhere; }
   @media (max-width: 700px) { main { margin-top: 1rem; } .layout { grid-template-columns: 1fr; } }
 </style>
@@ -55,58 +51,34 @@
     <section>
       <h2>Operator camera</h2>
       <div class="camera">
-        <p id="camera-note" class="camera-note">Enable your laptop camera to start tracking.</p>
+        <p id="camera-note" class="camera-note">Enable steering to start your camera and mic.</p>
         <video id="video" autoplay muted playsinline></video>
         <canvas id="overlay"></canvas>
       </div>
-      <div class="actions">
-        <button id="camera">Enable camera</button>
-        <button id="center" disabled>Set center</button>
-        <button id="arm" aria-pressed="false" disabled>Enable face steering</button>
-      </div>
-      <p class="help">Face the camera and select Set center. Move your face left or right to steer.</p>
-      <p class="help" id="state" role="status">Face steering is off.</p>
+      <p class="help">Look straight to center, then turn your head to steer.</p>
     </section>
     <section>
-      <h2>Steering</h2>
-      <div class="actions"><button id="usb">Connect Red Board</button></div>
+      <div class="actions">
+        <button id="usb">Connect Red Board</button>
+        <button id="enable" aria-pressed="false" disabled>Enable steering</button>
+      </div>
+      <p class="help" id="state" role="status">USB disconnected</p>
       <dl>
         <dt>Target</dt><dd id="target">—</dd>
         <dt>Rover heading</dt><dd id="heading">—</dd>
         <dt>Front distance</dt><dd id="distance">—</dd>
       </dl>
-      <div class="drive">
-        <button data-drive="forward" disabled>Forward</button>
-        <button data-drive="left" disabled>Left</button>
-        <button id="stop" disabled>Stop</button>
-        <button data-drive="right" disabled>Right</button>
-        <button data-drive="reverse" disabled>Reverse</button>
-      </div>
-      <p class="help">Hold a direction to drive manually. Release to stop.</p>
-      <div class="actions voice"><button id="voice" aria-pressed="false">Enable voice</button></div>
-      <p id="heard" class="help" role="status">Say “go forward,” “reverse,” “turn left,” “turn right,” or “stop.”</p>
+      <p id="voice-state" role="status">Mic off</p>
+      <p id="heard" class="help" role="status"></p>
+      <p class="help">Say “go forward,” “reverse,” “turn left,” “turn right,” “stop,” “resume,” or “recenter.” Press Esc to stop.</p>
     </section>
   </div>
 </main>
 <script>
-  const find = id => document.getElementById(id);
-  const video = find("video");
-  const canvas = find("overlay");
-  const context = canvas.getContext("2d");
-  const cameraButton = find("camera");
-  const centerButton = find("center");
-  const armButton = find("arm");
-  const voiceButton = find("voice");
-  const driveButtons = [...document.querySelectorAll("[data-drive]")];
-  const STOP = "stop";
-  const VOICE_MS = 1600;
-  const FACE_MAX_AGE_MS = 300;
-  const MEDIAPIPE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
-  const MODEL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
-  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
   class RedBoardConnection {
     ready = false;
     pending = 0;
+    version = 1;
     session = null;
 
     get bufferedAmount() {
@@ -118,6 +90,7 @@
       // requestPort must run from the Connect button's click.
       const port = await navigator.serial.requestPort();
       const session = {port, closing: false, pending: 0};
+      this.version = 1;
       this.session = session;
       try {
         await port.open({baudRate: 115200});
@@ -207,6 +180,7 @@
 
     process(session, line) {
       session.lastLine = line;
+      if (line === "READY_FACE_V2") this.version = 2;
       if (session.waiter?.expected === line) {
         session.waiter.finish();
         return;
@@ -214,12 +188,12 @@
       if (!this.ready || session.closing || this.session !== session) return;
       if (line === "ZEROED") {
         this.onmessage?.({data: JSON.stringify({kind: "armed"})});
-      } else if (line.startsWith("STATUS ")) {
-        const [, headingText, distanceText] = line.split(/\s+/);
+      } else if (line.startsWith("STATUS ") || line.startsWith("TELEMETRY ")) {
+        const [, headingText, distanceText, reason] = line.split(/\s+/);
         const heading = Number(headingText);
         const distance = distanceText === "NA" ? null : Number(distanceText);
         if (!Number.isFinite(heading) || (distance !== null && !Number.isFinite(distance))) return;
-        this.onmessage?.({data: JSON.stringify({kind: "status", heading, distance})});
+        this.onmessage?.({data: JSON.stringify({kind: "status", heading, distance, reason})});
       }
     }
 
@@ -228,16 +202,17 @@
       const session = this.session;
       const message = JSON.parse(payload);
       const commands = {
-        forward: "DRIVE 0.28 0.28\n", reverse: "DRIVE -0.28 -0.28\n",
-        left: "DRIVE -0.28 0.28\n", right: "DRIVE 0.28 -0.28\n",
-        stop: "STOP\n", disarm: "STOP\n", arm: "STOP\nZERO\n", status: "STATUS\n",
+        stop: "STOP\n", arm: "STOP\nZERO\n",
+        status: this.version === 2 ? "TELEMETRY\n" : "STATUS\n",
       };
       let command;
       if (message.kind === "aim") {
-        const {angle, base} = message;
-        if (!Number.isFinite(angle) || !Number.isFinite(base)
-            || Math.abs(angle) > 45 || Math.abs(base) > 0.28) return;
-        command = "AIM " + angle.toFixed(1) + " " + base.toFixed(2) + "\n";
+        const {angle, base, rate} = message;
+        const maxAngle = this.version === 2 ? 55 : 45;
+        if (!Number.isFinite(angle) || !Number.isFinite(base) || !Number.isFinite(rate)
+            || Math.abs(angle) > maxAngle || Math.abs(base) > 0.28 || Math.abs(rate) > 180) return;
+        const speed = this.version === 2 ? " " + rate.toFixed(0) : "";
+        command = "AIM " + angle.toFixed(1) + " " + base.toFixed(2) + speed + "\n";
       } else if (Object.hasOwn(commands, message.kind)) {
         command = commands[message.kind];
       }
@@ -277,395 +252,532 @@
   }
 
   const socket = new RedBoardConnection();
+  const byId = id => document.getElementById(id);
+  const video = byId("video");
+  const canvas = byId("overlay");
+  const ctx = canvas.getContext("2d");
+  const usbButton = byId("usb");
+  const enableButton = byId("enable");
+  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const MAX_YAW = 55;
+  const MAX_RATE = 180;
+  const FACE_TIMEOUT = 240;
+  const VOICE_DURATION = 1600;
+  const TRACK_MS = 33;
+  const MEDIAPIPE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
+  const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  let stream, detector, face, center, manual, voiceAction, recognition;
-  let armed = false;
-  let waitingForArm = false;
-  let trackingBusy = false;
-  let voiceEnabled = false;
-  let lastFrame = -1;
-  let lastDetectionTime = 0;
-  let targetAngle = 0;
-  let headingOffset = 0;
-  let lastStatus = 0;
-  let distance = null;
+  let enabled = false;
+  let generation = 0;
+  let hidden = document.hidden;
+  let stream, tracker, recognition, restartSpeech;
+  let trackingError = "", voiceLabel = "Mic off";
+  let face, previousFrame = -1, lastSample = 0, calibration = [], neutral = null;
+  let filteredYaw = 0, faceAngle = 0, faceRate = 0, lastControlPose = 0, yawOffset = 0;
+  let latestStatus = null, lastPoll = 0, lastMotionAt = 0, lastMotion = "";
+  let started = false, zeroAt = null, zeroAttempts = 0, voiceStop = false, translation = null;
+  let motionBlock = null;
 
-  const clip = (number, min, max) => Math.min(max, Math.max(min, number));
-  const degrees = value => Math.abs(value) < 1 ? "0° · center"
-    : Math.round(Math.abs(value)) + (value > 0 ? "° left" : "° right");
-  const connected = () => socket.ready;
-  const faceFresh = () => face && performance.now() - face.time < FACE_MAX_AGE_MS;
-  const effectiveTarget = () => clip(headingOffset + targetAngle, -45, 45);
-
-  function send(kind, fields = {}) {
-    if (connected()) socket.send(JSON.stringify({kind, ...fields}));
-  }
-
-  function updateControls() {
-    centerButton.disabled = !faceFresh();
-    armButton.disabled = !connected() || waitingForArm || (!armed && (!faceFresh() || center == null));
-    armButton.textContent = armed ? "Disable face steering" : "Enable face steering";
-    armButton.setAttribute("aria-pressed", String(armed));
-    find("stop").disabled = !connected();
-    driveButtons.forEach(button => button.disabled = !connected());
-  }
-
-  function stopManual() {
-    if (manual) manual.button.classList.remove("active");
-    manual = null;
-    send(STOP);
-  }
-
-  function disarm(message) {
-    armed = false;
-    waitingForArm = false;
-    voiceAction = null;
-    stopManual();
-    send("disarm");
-    find("state").textContent = message;
-    updateControls();
-  }
-
-  function aimFromFace() {
-    if (center == null || !faceFresh()) return 0;
-    const offset = (center - face.x) / Math.max(0.12, face.width);
-    const adjusted = Math.sign(offset) * Math.max(0, Math.abs(offset) - 0.07);
-    return clip(adjusted * 70, -45, 45);
-  }
-
-  function clearVoice() {
-    voiceAction = null;
-    send(STOP);
-  }
-
-  function controlTick() {
-    const now = performance.now();
-    if (!connected() || document.hidden) return;
-    updateControls();
-    if ((armed || waitingForArm) && !faceFresh()) {
-      disarm("Face lost. Center yourself, then enable steering again.");
-      return;
-    }
-    if (now - lastStatus >= 350 && socket.bufferedAmount === 0) {
-      send("status");
-      lastStatus = now;
-    }
-    if (socket.bufferedAmount !== 0) return;
-    if (manual) {
-      send(manual.button.dataset.drive);
-      return;
-    }
-    if (!armed) return;
-
-    if (voiceAction && voiceAction.until <= now) clearVoice();
-    const base = voiceAction?.base ?? 0;
-    const angle = effectiveTarget();
-    if (base > 0 && (distance === null || distance < 20)) {
-      clearVoice();
-      find("heard").textContent = distance === null
-        ? "Forward stopped · no usable front distance."
-        : "Forward stopped · obstacle ahead.";
-      return;
-    }
-    send("aim", {angle, base});
-  }
-
-  const usbButton = find("usb");
-  socket.onopen = () => {
-    usbButton.textContent = "Red Board connected";
-    usbButton.disabled = true;
-    find("connection").textContent = "Red Board connected";
-    updateControls();
+  const clamp = (n, max) => Math.max(-max, Math.min(max, n));
+  const angleDelta = a => ((a + 180) % 360 + 360) % 360 - 180;
+  const degrees = a => Math.abs(a) < 1 ? "0°" : Math.round(Math.abs(a)) + (a > 0 ? "° left" : "° right");
+  const limit = () => socket.version === 2 ? MAX_YAW : 45;
+  const target = () => clamp(faceAngle + yawOffset, limit());
+  const liveFace = now => face && now - face.at < FACE_TIMEOUT;
+  const send = (kind, fields = {}) => {
+    if (socket.ready) socket.send(JSON.stringify({kind, ...fields}));
   };
-  socket.onclose = error => {
-    disarm("Connection closed. Use Connect Red Board to reconnect.");
-    distance = null;
-    find("heading").textContent = "—";
-    find("distance").textContent = "—";
-    usbButton.textContent = "Connect Red Board";
+
+  function stopMotion() {
+    if (lastMotion !== "stop") send("stop");
+    lastMotion = "stop";
+    translation = null;
+  }
+
+  function calibrate() {
+    stopMotion();
+    calibration = [];
+    neutral = null;
+    started = false;
+    zeroAt = null;
+    zeroAttempts = 0;
+    motionBlock = null;
+    filteredYaw = faceAngle = faceRate = yawOffset = 0;
+    lastControlPose = 0;
+  }
+
+  function render() {
+    usbButton.hidden = socket.ready;
+    enableButton.textContent = enabled ? "Disable steering" : "Enable steering";
+    enableButton.setAttribute("aria-pressed", String(enabled));
+    enableButton.disabled = !enabled && !socket.ready;
+    byId("voice-state").textContent = voiceLabel;
+
+    const now = performance.now();
+    const report = latestStatus && now - latestStatus.at < 650 ? latestStatus : null;
+    const hasFace = liveFace(now);
+    byId("target").textContent = enabled && neutral !== null && hasFace ? degrees(target()) : "—";
+    byId("heading").textContent = report ? degrees(report.heading) : "—";
+    byId("distance").textContent = report ? (report.distance === null ? "No echo" : report.distance.toFixed(1) + " cm") : "—";
+
+    let reason;
+    if (!socket.ready) reason = "USB disconnected";
+    else if (!enabled) reason = "Steering off";
+    else if (voiceStop) reason = "Stopped · say “resume”";
+    else if (hidden) reason = "Paused · page inactive";
+    else if (trackingError) reason = trackingError;
+    else if (!tracker || !stream) reason = "Starting camera";
+    else if (!hasFace) reason = "Face out of frame";
+    else if (neutral === null) reason = "Look straight to center";
+    else if (!started) reason = zeroAt && now - zeroAt > 900 ? "No heading reply" : "Setting heading zero";
+    else if (!report) reason = "Waiting for rover data";
+    else if (report.reason === "POWER_OFF") reason = "Motor power off";
+    else if (motionBlock && now < motionBlock.until) reason = motionBlock.text;
+    else if (report.reason === "WHEELS_STALLED") reason = "Wheels not moving";
+    else if (report.reason === "OBSTACLE") reason = "Obstacle ahead";
+    else if (report.reason === "NO_ECHO") reason = "Front sensor has no echo";
+    else if (report.reason === "COMMAND_LOST") reason = "No steering updates";
+    else if (translation?.base > 0 && report.distance === null) reason = "Front sensor has no echo";
+    else if (translation?.base > 0 && report.distance < 20) reason = "Obstacle ahead";
+    else if (translation) reason = translation.base > 0 ? "Driving forward" : "Reversing";
+    else if (Math.abs(angleDelta(target() - report.heading)) <= 2.5) reason = "Aligned";
+    else reason = "Turning";
+    if (byId("state").textContent !== reason) byId("state").textContent = reason;
+  }
+
+  function step(now = performance.now()) {
+    if (socket.ready && now - lastPoll >= 165 && socket.bufferedAmount === 0) {
+      send("status");
+      lastPoll = now;
+    }
+    if (!enabled || voiceStop || hidden || !socket.ready || !liveFace(now)) {
+      if (enabled) stopMotion();
+      render();
+      return;
+    }
+    if (neutral === null) {
+      render();
+      return;
+    }
+    if (!started) {
+      if ((zeroAt === null || now - zeroAt > 700) && zeroAttempts < 3 && socket.bufferedAmount === 0) {
+        zeroAt = now;
+        zeroAttempts++;
+        send("arm");
+      }
+      render();
+      return;
+    }
+    if (!latestStatus || now - latestStatus.at > 650) {
+      stopMotion();
+      render();
+      return;
+    }
+    if (translation && translation.until <= now) translation = null;
+    if (translation && latestStatus.reason === "POWER_OFF") stopMotion();
+    if (translation?.base > 0 &&
+        (latestStatus.distance === null || latestStatus.distance < 20)) {
+      motionBlock = {
+        text: latestStatus.distance === null ? "Front sensor has no echo" : "Obstacle ahead",
+        until: now + 1800,
+      };
+      stopMotion();
+      render();
+      return;
+    }
+
+    const base = translation?.base ?? 0;
+    const angle = Math.round(target() * 10) / 10;
+    const rate = now - lastControlPose < 110 ? Math.round(clamp(faceRate, MAX_RATE)) : 0;
+    const packet = angle.toFixed(1) + " " + base.toFixed(2) + " " + rate;
+    if (socket.bufferedAmount === 0 && (
+      now - lastMotionAt >= 115 || (packet !== lastMotion && now - lastMotionAt >= 31)
+    )) {
+      send("aim", {angle, base, rate});
+      lastMotionAt = now;
+      lastMotion = packet;
+    }
+    render();
+  }
+
+  // Canonical head rotation is independent of the affine translation.
+  function poseOf(result) {
+    const matrix = result.facialTransformationMatrixes?.[0]?.data;
+    const points = result.faceLandmarks?.[0];
+    if (!matrix || matrix.length !== 16 || !points) return null;
+
+    const columnTail = Math.abs(matrix[3]) + Math.abs(matrix[7]) + Math.abs(matrix[11]);
+    const rowTail = Math.abs(matrix[12]) + Math.abs(matrix[13]) + Math.abs(matrix[14]);
+    const forwardX = columnTail < rowTail ? matrix[8] : matrix[2];
+    const forwardZ = matrix[10];
+    if (!Number.isFinite(forwardX) || !Number.isFinite(forwardZ) || forwardZ < 0.15) return null;
+
+    const left = points[234], right = points[454], top = points[10], bottom = points[152];
+    if (!left || !right || !top || !bottom) return null;
+    const x0 = Math.min(left.x, right.x);
+    const x1 = Math.max(left.x, right.x);
+    const y0 = Math.min(top.y, bottom.y);
+    const y1 = Math.max(top.y, bottom.y);
+    if (x1 - x0 < 0.085 || y1 - y0 < 0.13 ||
+        x0 < 0.015 || x1 > 0.985 || y0 < 0.015 || y1 > 0.985) return null;
+    return { yaw: Math.atan2(forwardX, forwardZ) * 180 / Math.PI, box: [x0, y0, x1, y1] };
+  }
+
+  async function loadModel(bundle, model, gpu) {
+    const {FaceLandmarker, FilesetResolver} = await import(bundle + "/vision_bundle.mjs");
+    const assets = await FilesetResolver.forVisionTasks(bundle + "/wasm");
+    const options = {
+      baseOptions: {modelAssetPath: model},
+      runningMode: "VIDEO", numFaces: 1,
+      minFaceDetectionConfidence: 0.62, minFacePresenceConfidence: 0.60, minTrackingConfidence: 0.62,
+      outputFaceBlendshapes: false, outputFacialTransformationMatrixes: true,
+    };
+    if (gpu) {
+      try {
+        return await FaceLandmarker.createFromOptions(assets, {
+          ...options, baseOptions: {...options.baseOptions, delegate: "GPU"},
+        });
+      } catch (_) {}
+    }
+    return FaceLandmarker.createFromOptions(assets, options);
+  }
+
+  function trackingWorker() {
+    let model;
+    self.onmessage = async event => {
+      const {kind, bundle, asset, frame, at} = event.data;
+      try {
+        if (kind === "start") {
+          model = await loadModel(bundle, asset, false);
+          self.postMessage({kind: "ready"});
+        } else {
+          self.postMessage({kind: "pose", pose: poseOf(model.detectForVideo(frame, at))});
+        }
+      } catch (error) {
+        self.postMessage({kind: "error", message: error.message});
+      } finally {
+        frame?.close();
+      }
+    };
+  }
+
+  async function makeTracker() {
+    if (window.Worker && window.OffscreenCanvas && window.createImageBitmap) {
+      const blob = new Blob([
+        poseOf.toString(), "\n", loadModel.toString(), "\n(", trackingWorker.toString(), ")();"
+      ], {type: "text/javascript"});
+      const url = URL.createObjectURL(blob);
+      let worker;
+      try {
+        worker = new Worker(url);
+        const ask = (message, transfers = [], timeout = 800) => new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("Face tracker timed out")), timeout);
+          worker.onmessage = event => {
+            clearTimeout(timer);
+            if (event.data.kind === "error") reject(new Error(event.data.message));
+            else resolve(event.data);
+          };
+          worker.onerror = event => {
+            clearTimeout(timer);
+            reject(new Error(event.message));
+          };
+          worker.postMessage(message, transfers);
+        });
+        await ask({kind: "start", bundle: MEDIAPIPE, asset: MODEL}, [], 12000);
+        return {
+          close: () => worker.terminate(),
+          async predict(at) {
+            const frame = await createImageBitmap(video);
+            return (await ask({kind: "frame", frame, at}, [frame])).pose;
+          },
+        };
+      } catch (_) {
+        worker?.terminate();
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+    const model = await loadModel(MEDIAPIPE, MODEL, true);
+    return {close: () => model.close(), predict: at => poseOf(model.detectForVideo(video, at))};
+  }
+
+  function draw(box) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!box) return;
+    const [x0, y0, x1, y1] = box;
+    ctx.strokeStyle = "#a5ecc5";
+    ctx.lineWidth = 2;
+    ctx.strokeRect((1 - x1) * canvas.width, y0 * canvas.height,
+                   (x1 - x0) * canvas.width, (y1 - y0) * canvas.height);
+  }
+
+  function acceptPose(pose, at) {
+    if (!pose || performance.now() - at >= FACE_TIMEOUT) {
+      if (!liveFace(performance.now())) draw(null);
+      return;
+    }
+    face = {at};
+    draw(pose.box);
+    if (neutral === null) {
+      calibration.push(pose.yaw);
+      if (calibration.length > 7) calibration.shift();
+      if (calibration.length === 7 && Math.max(...calibration) - Math.min(...calibration) < 6) {
+        neutral = calibration.reduce((a, b) => a + b, 0) / calibration.length;
+      }
+      return;
+    }
+
+    const raw = angleDelta(pose.yaw - neutral);
+    const dt = lastControlPose ? Math.max(12, at - lastControlPose) : TRACK_MS;
+    const alpha = Math.abs(raw - filteredYaw) > 4 ? 0.78 : 0.45;
+    filteredYaw += alpha * (raw - filteredYaw);
+    const next = Math.abs(filteredYaw) < 2 ? 0 : clamp(filteredYaw, MAX_YAW);
+    const rate = dt > FACE_TIMEOUT ? 0 : clamp((next - faceAngle) * 1000 / dt, MAX_RATE);
+    faceRate = 0.60 * rate + 0.40 * faceRate;
+    if (next === 0 && Math.abs(rate) < 3) faceRate = 0;
+    faceAngle = next;
+    lastControlPose = at;
+  }
+
+  async function track(token) {
+    if (!enabled || generation !== token || !stream) return;
+    const at = performance.now();
+    if (!hidden && tracker && video.readyState >= 2 && video.currentTime !== previousFrame && at - lastSample >= TRACK_MS) {
+      previousFrame = video.currentTime;
+      lastSample = at;
+      try {
+        const pose = await tracker.predict(at);
+        if (enabled && generation === token) {
+          acceptPose(pose, at);
+          step();
+        }
+      } catch (_) {
+        if (generation !== token) return;
+        trackingError = "Face tracking restarting";
+        face = null;
+        stopMotion();
+        if (tracker) tracker.close();
+        tracker = null;
+        await delay(300);
+        if (enabled && generation === token) await prepareTracker(token);
+      }
+    }
+    if (enabled && generation === token) requestAnimationFrame(() => void track(token));
+  }
+
+  async function prepareTracker(token) {
+    try {
+      const result = await makeTracker();
+      if (generation === token && enabled) {
+        tracker = result;
+        trackingError = "";
+      } else {
+        result.close();
+      }
+    } catch (_) {
+      if (generation === token) {
+        trackingError = "Face model unavailable";
+        stopMotion();
+      }
+    }
+  }
+
+  function spoken(event) {
+    if (!enabled || hidden) return;
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const item = event.results[i];
+      const command = item[0].transcript.toLowerCase().replace(/[^a-z ]/g, "").trim()
+        .replace(/ +/g, " ").replace(/^(?:rover|please) /, "");
+      if (/^(?:stop|halt|brake)(?: (?:now|rover|please))?$/.test(command)) {
+        voiceStop = true;
+        motionBlock = null;
+        stopMotion();
+        byId("heard").textContent = "Stop";
+        render();
+        return;
+      }
+      if (!item.isFinal) continue;
+      if (command === "resume") {
+        voiceStop = false;
+        byId("heard").textContent = "Resume";
+        step();
+      } else if (command === "center" || command === "recenter") {
+        voiceStop = false;
+        calibrate();
+        byId("heard").textContent = "Center";
+      } else if (!voiceStop && started && liveFace(performance.now())) {
+        let accepted = true;
+        if (["go forward", "forward", "move forward"].includes(command)) {
+          motionBlock = null;
+          translation = {base: 0.25, until: performance.now() + VOICE_DURATION};
+        } else if (["reverse", "back up", "go back"].includes(command)) {
+          motionBlock = null;
+          translation = {base: -0.22, until: performance.now() + VOICE_DURATION};
+        } else if (["left", "turn left", "right", "turn right"].includes(command)) {
+          motionBlock = null;
+          translation = null;
+          const delta = command.endsWith("left") ? 25 : -25;
+          yawOffset = clamp(target() + delta, limit()) - faceAngle;
+        } else {
+          accepted = false;
+        }
+        if (accepted) {
+          byId("heard").textContent = command;
+          step();
+        }
+      }
+    }
+  }
+
+  function startVoice(token) {
+    if (!Speech) {
+      voiceLabel = "Voice unavailable";
+      return;
+    }
+    const active = new Speech();
+    recognition = active;
+    active.lang = "en-US";
+    active.continuous = true;
+    active.interimResults = true;
+    active.onresult = spoken;
+    active.onstart = () => {
+      if (generation === token) voiceLabel = "Listening";
+    };
+    active.onerror = event => {
+      if (generation !== token || event.error === "aborted" || event.error === "no-speech") return;
+      voiceLabel = event.error === "not-allowed" ? "Mic permission denied" : "Voice unavailable";
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") active.onend = null;
+    };
+    active.onend = () => {
+      if (!enabled || generation !== token) return;
+      voiceLabel = "Mic reconnecting";
+      restartSpeech = setTimeout(() => {
+        if (enabled && generation === token) {
+          try { active.start(); } catch (_) {}
+        }
+      }, 300);
+    };
+    try { active.start(); } catch (_) { voiceLabel = "Voice unavailable"; }
+  }
+
+  function disable() {
+    enabled = false;
+    generation++;
+    clearTimeout(restartSpeech);
+    if (recognition) {
+      recognition.onend = null;
+      recognition.abort();
+      recognition = null;
+    }
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    stream = null;
+    if (tracker) tracker.close();
+    tracker = null;
+    video.srcObject = null;
+    face = null;
+    previousFrame = -1;
+    voiceLabel = "Mic off";
+    byId("camera-note").hidden = false;
+    draw(null);
+    calibrate();
+    render();
+  }
+
+  async function enable() {
+    if (!socket.ready || enabled) return;
+    enabled = true;
+    const token = ++generation;
+    face = null;
+    voiceStop = false;
+    trackingError = "";
+    calibrate();
+    startVoice(token);
+    render();
+    try {
+      const camera = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {facingMode: "user", width: {ideal: 640}, height: {ideal: 400}, frameRate: {ideal: 30}},
+      });
+      if (!enabled || generation !== token) {
+        camera.getTracks().forEach(track => track.stop());
+        return;
+      }
+      stream = camera;
+      video.srcObject = camera;
+      await video.play();
+      if (generation !== token) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      byId("camera-note").hidden = true;
+      camera.getVideoTracks()[0].addEventListener("ended", () => {
+        if (generation !== token) return;
+        face = null;
+        trackingError = "Camera disconnected";
+        stopMotion();
+        render();
+      });
+      await prepareTracker(token);
+      if (enabled && generation === token) requestAnimationFrame(() => void track(token));
+    } catch (_) {
+      if (generation !== token) return;
+      trackingError = "Camera permission denied or unavailable";
+      stopMotion();
+      render();
+    }
+  }
+
+  socket.onopen = () => {
+    latestStatus = null;
+    byId("connection").textContent = socket.version === 2 ? "Red Board connected" : "Red Board connected · controller update available";
+    render();
+  };
+  socket.onclose = message => {
+    disable();
+    latestStatus = null;
     usbButton.disabled = false;
-    find("connection").textContent = error || "Disconnected";
+    byId("connection").textContent = message || "Red Board disconnected";
+    render();
+  };
+  socket.onmessage = event => {
+    const message = JSON.parse(event.data);
+    if (message.kind === "armed" && enabled && zeroAt !== null) {
+      started = true;
+    } else if (message.kind === "status") {
+      latestStatus = {...message, at: performance.now()};
+    }
+    step();
   };
 
   if (!window.isSecureContext || !("serial" in navigator)) {
     usbButton.disabled = true;
-    find("connection").textContent = "Open the HTTPS page directly in desktop Chrome or Edge.";
+    byId("connection").textContent = "Open the HTTPS page in desktop Chrome or Edge";
   } else {
     usbButton.addEventListener("click", async () => {
       usbButton.disabled = true;
-      find("connection").textContent = "Connecting to the Red Board…";
-      try {
-        await socket.connect();
-      } catch (error) {
-        find("connection").textContent = "USB: " + error.message;
+      byId("connection").textContent = "Connecting…";
+      try { await socket.connect(); }
+      catch (error) {
+        byId("connection").textContent = "USB: " + error.message;
         usbButton.disabled = false;
       }
     });
   }
-  socket.onmessage = event => {
-    const message = JSON.parse(event.data);
-    if (message.kind === "armed") {
-      if (!waitingForArm || !faceFresh() || document.hidden || Math.abs(aimFromFace()) > 3) {
-        disarm("Face steering is off.");
-        return;
-      }
-      waitingForArm = false;
-      armed = true;
-      find("state").textContent = "Face steering enabled.";
-      updateControls();
-    } else if (message.kind === "status") {
-      find("heading").textContent = degrees(message.heading);
-      distance = message.distance;
-      find("distance").textContent = distance === null ? "No echo" : distance.toFixed(1) + " cm";
-    }
-  };
-
-  function drawFace(box) {
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    if (box) {
-      context.strokeStyle = "#a5ecc5";
-      context.lineWidth = 3;
-      context.strokeRect(canvas.width - box.originX - box.width, box.originY, box.width, box.height);
-    }
-    if (center != null) {
-      const x = center * canvas.width;
-      context.strokeStyle = "#f0d492";
-      context.lineWidth = 2;
-      context.beginPath();
-      context.moveTo(x, 0);
-      context.lineTo(x, canvas.height);
-      context.stroke();
-    }
-  }
-
-  function track(now) {
-    if (!stream) return;
-    requestAnimationFrame(track);
-    if (!detector || video.readyState < 2 || video.currentTime === lastFrame || now - lastDetectionTime < 65) return;
-    lastFrame = video.currentTime;
-    lastDetectionTime = now;
-    let detections;
-    try {
-      detections = detector.detectForVideo(video, now).detections;
-    } catch (error) {
-      stream.getTracks().forEach(track => track.stop());
-      stream = null;
-      face = null;
-      center = null;
-      lastFrame = -1;
-      cameraButton.disabled = false;
-      cameraButton.textContent = "Enable camera";
-      find("camera-note").hidden = false;
-      find("camera-note").textContent = "Face tracking stopped: " + error.message;
-      disarm("Face tracking stopped.");
-      return;
-    }
-    const box = detections.length === 1 ? detections[0].boundingBox : null;
-    if (!box) {
-      face = null;
-      if (armed || waitingForArm) disarm("Keep one face visible. Enable steering again when ready.");
-      find("target").textContent = "—";
-      drawFace(null);
-      updateControls();
-      return;
-    }
-    face = {x: 1 - (box.originX + box.width / 2) / video.videoWidth,
-            width: box.width / video.videoWidth, time: now};
-    targetAngle += 0.40 * (aimFromFace() - targetAngle);
-    find("target").textContent = center == null ? "Set center" : degrees(effectiveTarget());
-    drawFace(box);
-    updateControls();
-  }
-
-  cameraButton.addEventListener("click", async () => {
-    if (trackingBusy || stream) return;
-    trackingBusy = true;
-    cameraButton.disabled = true;
-    find("camera-note").textContent = "Starting camera and loading face tracking…";
-    try {
-      const {FaceDetector, FilesetResolver} = await import(MEDIAPIPE + "/vision_bundle.mjs");
-      const assets = await FilesetResolver.forVisionTasks(MEDIAPIPE + "/wasm");
-      detector = await FaceDetector.createFromOptions(assets, {
-        baseOptions: { modelAssetPath: MODEL }, runningMode: "VIDEO", minDetectionConfidence: 0.6,
-      });
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: false, video: { facingMode: "user", width: {ideal: 640}, height: {ideal: 400} },
-      });
-      video.srcObject = stream;
-      await video.play();
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      find("camera-note").hidden = true;
-      cameraButton.textContent = "Camera on";
-      stream.getVideoTracks()[0].addEventListener("ended", () => {
-        stream = null;
-        face = null;
-        center = null;
-        lastFrame = -1;
-        cameraButton.disabled = false;
-        cameraButton.textContent = "Enable camera";
-        find("camera-note").hidden = false;
-        find("camera-note").textContent = "Camera disconnected.";
-        disarm("Camera disconnected. Face steering stopped.");
-      });
-      requestAnimationFrame(track);
-    } catch (error) {
-      if (stream) stream.getTracks().forEach(track => track.stop());
-      stream = null;
-      find("camera-note").textContent = "Camera or tracking could not start: " + error.message;
-      cameraButton.disabled = false;
-    } finally {
-      trackingBusy = false;
-    }
-  });
-
-  centerButton.addEventListener("click", () => {
-    if (!faceFresh()) return;
-    disarm("Center set. Enable face steering when ready.");
-    center = face.x;
-    targetAngle = 0;
-    headingOffset = 0;
-    find("target").textContent = degrees(0);
-    updateControls();
-  });
-  armButton.addEventListener("click", () => {
-    if (armed) {
-      disarm("Face steering is off.");
-    } else if (center != null && faceFresh() && connected()) {
-      if (Math.abs(aimFromFace()) > 3) {
-        find("state").textContent = "Move back to the center line, then enable steering.";
-        return;
-      }
-      headingOffset = 0;
-      targetAngle = 0;
-      waitingForArm = true;
-      send("arm");
-      find("state").textContent = "Setting the rover's center heading…";
-      updateControls();
-    }
-  });
-  find("stop").addEventListener("click", () => disarm("Stopped. Enable face steering to resume."));
-
-  driveButtons.forEach(button => {
-    button.addEventListener("pointerdown", event => {
-      if (!event.isPrimary || event.button !== 0 || !connected()) return;
-      disarm("Manual control. Enable face steering to resume tracking.");
-      button.setPointerCapture(event.pointerId);
-      manual = { button, id: event.pointerId };
-      button.classList.add("active");
-      send(button.dataset.drive);
-    });
-    for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) {
-      button.addEventListener(name, event => {
-        if (manual?.id === event.pointerId) stopManual();
-      });
-    }
-    button.addEventListener("keydown", event => {
-      if (event.key !== " " && event.key !== "Enter") return;
-      event.preventDefault();
-      if (event.repeat || !connected()) return;
-      disarm("Manual control. Enable face steering to resume tracking.");
-      manual = { button, id: null };
-      button.classList.add("active");
-      send(button.dataset.drive);
-    });
-    button.addEventListener("keyup", event => {
-      if ((event.key === " " || event.key === "Enter") && manual?.button === button) stopManual();
-    });
-    button.addEventListener("blur", () => {
-      if (manual?.button === button) stopManual();
-    });
-  });
-
-  if (!Speech) {
-    voiceButton.disabled = true;
-    find("heard").textContent = "Open this page in Chrome for voice commands.";
-  } else {
-    recognition = new Speech();
-    recognition.lang = "en-US";
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.onstart = () => {
-      voiceButton.textContent = "Voice on";
-      voiceButton.setAttribute("aria-pressed", "true");
-      find("heard").textContent = "Listening…";
-    };
-    recognition.onerror = event => {
-      if (event.error === "no-speech") return;
-      voiceEnabled = false;
-      disarm("Voice stopped.");
-      find("heard").textContent = "Voice error: " + event.error;
-    };
-    recognition.onend = () => {
-      if (voiceEnabled && !document.hidden) {
-        setTimeout(() => {
-          if (voiceEnabled && !document.hidden) {
-            try { recognition.start(); } catch (_) {}
-          }
-        }, 350);
-      } else {
-        voiceButton.textContent = "Enable voice";
-        voiceButton.setAttribute("aria-pressed", "false");
-      }
-    };
-    recognition.onresult = event => {
-      if (!voiceEnabled || document.hidden) return;
-      for (let index = event.resultIndex; index < event.results.length; index++) {
-        const result = event.results[index];
-        const raw = result[0].transcript;
-        const words = raw.toLowerCase().replace(/[^a-z ]/g, "").trim().replace(/ +/g, " ");
-        const isStop = /^(?:(?:rover|please) )?(?:stop|halt)(?: (?:now|rover|please))?$/.test(words);
-        if (isStop) {
-          disarm("Voice stop received. Enable face steering to resume.");
-          find("heard").textContent = "Heard: " + raw;
-          return;
-        }
-        if (!result.isFinal) continue;
-        const intent = {
-          "go forward": {base: .25}, "forward": {base: .25},
-          "move forward": {base: .25}, "reverse": {base: -.22}, "back up": {base: -.22},
-          "turn left": {turn: 25}, "left": {turn: 25},
-          "turn right": {turn: -25}, "right": {turn: -25},
-        };
-        const command = words.replace(/^(?:rover|please) /, "");
-        const action = Object.hasOwn(intent, command) ? intent[command] : null;
-        find("heard").textContent = "Heard: " + raw;
-        if (!action || !armed || !faceFresh()) continue;
-        if (action.turn !== undefined) {
-          if (voiceAction) clearVoice();
-          headingOffset = clip(headingOffset + action.turn, -45, 45);
-        } else {
-          voiceAction = {...action, until: performance.now() + VOICE_MS};
-        }
-        find("heard").textContent = "Command: " + command;
-      }
-    };
-    voiceButton.addEventListener("click", () => {
-      if (voiceEnabled) {
-        voiceEnabled = false;
-        recognition.abort();
-        disarm("Voice turned off. Face steering paused.");
-        find("heard").textContent = "Voice is off.";
-        return;
-      }
-      voiceEnabled = true;
-      try { recognition.start(); }
-      catch (error) {
-        voiceEnabled = false;
-        find("heard").textContent = error.message;
-      }
-    });
-  }
-
-  window.addEventListener("blur", () => disarm("Focus lost. Face steering stopped."));
-  window.addEventListener("pagehide", () => disarm("Page closed."));
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape") disarm("Stopped. Enable face steering to resume.");
-  });
+  enableButton.addEventListener("click", () => enabled ? disable() : void enable());
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) disarm("Page hidden. Face steering stopped.");
+    hidden = document.hidden;
+    if (hidden) stopMotion();
+    render();
   });
-  setInterval(controlTick, 100);
+  window.addEventListener("pagehide", stopMotion);
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && enabled) {
+      voiceStop = true;
+      stopMotion();
+      render();
+    }
+  });
+  setInterval(() => step(), 32);
 </script>
 </body>
 </html>
