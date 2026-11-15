@@ -182,19 +182,28 @@ summary { cursor: pointer; width: fit-content; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 
-.phone-panel { margin-top: 2rem; border-top: 1px solid #77678a; padding-top: 1rem; }
-.phone-panel summary { width: fit-content; cursor: pointer; color: #e6d6fa; font-size: 1.2rem; }
-.phone-panel summary:focus-visible { outline: 2px solid #e6d6fa; outline-offset: 6px; }
-.phone-content { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 1.2rem; margin-top: 1rem; }
-.phone-content [hidden] { display: none !important; }
-.phone-preview { width: 100%; aspect-ratio: 16/9; object-fit: contain; border-radius: .75rem; background: #151122; }
+.camera-heading { height: auto; min-height: 44px; flex-wrap: wrap; }
+.camera-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.camera-tabs button { min-height: 44px; padding: 6px 12px; color: var(--muted); border-color: transparent; }
+.camera-tabs button[aria-selected='true'] { border-color: #77678a; color: #f5f3fc; background: #34284e; }
+.camera-views { position: relative; }
+.camera-view[data-active='false'] { position: absolute; inset: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.camera-view [hidden], .camera-heading [hidden] { display: none !important; }
+.camera-note button { margin-top: 1rem; min-height: 44px; padding: .5rem .85rem; }
+#phone-badge { color: var(--muted); font-size: clamp(14px, 1.45vw, 20px); }
+.phone-feed video { transform: none; }
+.phone-controls { margin-top: 1rem; }
+.phone-controls [hidden] { display: none !important; }
 .phone-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-block: .65rem; }
 .phone-actions button { min-height: 44px; padding: .5rem .8rem; }
 .phone-controls p { margin-block: .25rem .65rem; }
 .phone-qr { display: inline-block; padding: 1rem; border-radius: .4rem; background: #fff; }
 .phone-qr img, .phone-qr canvas { max-width: 100%; }
 .phone-link { display: block; width: 100%; max-width: 28rem; margin-top: .5rem; padding: .45rem; border: 1px solid #77678a; border-radius: .4rem; font: inherit; background: #211a36; color: #f5f3fc; }
-@media (max-width: 800px) { .phone-content { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) {
+  .camera-heading { gap: 8px; }
+  .camera-tabs button { font-size: 15px; padding-inline: 8px; }
+}
 </style>
 </head>
 <body>
@@ -204,13 +213,49 @@ summary { cursor: pointer; width: fit-content; }
     <div class="connection-group"><p id="connection" role="status">Red Board disconnected</p><div id="connection-actions" class="connection-actions" hidden><button id="bluetooth">Bluetooth</button><button id="usb">USB</button></div></div>
   </header>
   <div class="workspace">
-    <section class="camera-panel" aria-labelledby="camera-title">
-      <div class="camera-heading"><h2 id="camera-title">Operator camera</h2><span id="tracking-status">Camera off</span></div>
-      <div class="camera">
-        <div id="camera-note" class="camera-note"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="12" width="26" height="24" rx="5"/><path d="m32 20 10-6v20l-10-6"/></svg><strong id="camera-empty-title">Camera off</strong><p id="camera-instruction">Connect the Red Board, then enable steering.</p></div>
-        <video id="video" autoplay muted playsinline></video>
-        <canvas id="overlay" aria-hidden="true"></canvas>
-        <span class="alignment-tick" aria-hidden="true"></span>
+    <section class="camera-panel" aria-label="Camera feeds">
+      <div class="camera-heading">
+        <div class="camera-tabs" role="tablist" aria-label="Camera view">
+          <button id="laptop-tab" type="button" role="tab" aria-selected="true" aria-controls="laptop-panel">Laptop camera</button>
+          <button id="phone-tab" type="button" role="tab" aria-selected="false" aria-controls="phone-panel" tabindex="-1">Phone camera</button>
+        </div>
+        <span id="tracking-status">Camera off</span><span id="phone-badge" hidden>Phone offline</span>
+      </div>
+      <div class="camera-views">
+        <div class="camera-view" id="laptop-panel" role="tabpanel" aria-labelledby="laptop-tab" data-active="true">
+          <div class="camera">
+            <div id="camera-note" class="camera-note"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="12" width="26" height="24" rx="5"/><path d="m32 20 10-6v20l-10-6"/></svg><strong id="camera-empty-title">Camera off</strong><p id="camera-instruction">Start the laptop camera to preview it here.</p><button id="laptop-preview" type="button">Start laptop camera</button></div>
+            <video id="video" autoplay muted playsinline></video>
+            <canvas id="overlay" aria-hidden="true"></canvas>
+            <span class="alignment-tick" aria-hidden="true"></span>
+          </div>
+          <div class="phone-actions" id="laptop-preview-actions" hidden><button id="laptop-preview-stop" type="button">Stop laptop preview</button></div>
+        </div>
+        <div class="camera-view" id="phone-panel" role="tabpanel" aria-labelledby="phone-tab" aria-hidden="true" data-active="false" inert>
+          <div class="camera phone-feed">
+            <video id="rover-video" autoplay muted playsinline aria-label="Live rover camera"></video>
+            <div id="phone-camera-note" class="camera-note"><strong>Phone camera</strong><p>Start the rear camera on your phone to see its view here.</p></div>
+          </div>
+          <div class="phone-controls">
+            <p id="phone-status" role="status">Create a phone link or reopen your bookmarked link.</p>
+            <div class="phone-actions">
+              <button id="phone-pair" type="button">Create phone link</button>
+              <button id="phone-disconnect" type="button" hidden>Disconnect phone</button>
+            </div>
+            <div id="phone-pair-link" hidden>
+              <div id="phone-qr" class="phone-qr" aria-label="Scan with the phone camera app" hidden></div>
+              <input id="phone-url" class="phone-link" type="text" readonly aria-label="Private reusable phone link">
+              <div class="phone-actions"><button id="phone-copy" type="button">Copy phone link</button></div>
+            </div>
+            <p id="phone-intercom-status" role="status">Intercom off</p>
+            <div class="phone-actions">
+              <button id="phone-call" type="button" disabled>Start intercom</button>
+              <button id="phone-hangup" type="button" hidden>End intercom</button>
+              <button id="phone-audio-play" type="button" hidden>Enable laptop audio</button>
+            </div>
+            <audio id="phone-audio" autoplay playsinline></audio>
+          </div>
+        </div>
       </div>
     </section>
     <aside class="control-panel" aria-label="Rover controls">
@@ -238,31 +283,6 @@ summary { cursor: pointer; width: fit-content; }
       <span id="telemetry-status" class="sr-only">No data</span>
     </section>
   </div>
-  <details class="phone-panel" id="phone-panel">
-    <summary>Rover camera</summary>
-    <div class="phone-content">
-      <video id="rover-video" class="phone-preview" autoplay muted playsinline aria-label="Live rover camera"></video>
-      <div class="phone-controls">
-        <p id="phone-status" role="status">Pair an iPhone to see the rover’s view.</p>
-        <div class="phone-actions">
-          <button id="phone-pair" type="button">Pair iPhone</button>
-          <button id="phone-disconnect" type="button" hidden>Disconnect phone</button>
-        </div>
-        <div id="phone-pair-link" hidden>
-          <div id="phone-qr" class="phone-qr" aria-label="Scan with the iPhone Camera app" hidden></div>
-          <input id="phone-url" class="phone-link" type="text" readonly aria-label="Private phone pairing link">
-          <div class="phone-actions"><button id="phone-copy" type="button">Copy pairing link</button></div>
-        </div>
-        <p id="phone-intercom-status" role="status">Intercom off</p>
-        <div class="phone-actions">
-          <button id="phone-call" type="button" disabled>Start intercom</button>
-          <button id="phone-hangup" type="button" hidden>End intercom</button>
-          <button id="phone-audio-play" type="button" hidden>Enable laptop audio</button>
-        </div>
-        <audio id="phone-audio" autoplay playsinline></audio>
-      </div>
-    </div>
-  </details>
   <section class="secondary" aria-label="Operator help">
     <details><summary>Steering &amp; voice help</summary><div class="help-content"><p id="camera-guidance">Look straight to center. Turn your head to steer.</p><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop, “resume” to drive again, or “recenter” to calibrate.</p><p>Forward motion pauses below 20 cm or when the front sensor has no echo. Motion pauses when tracking or rover data is lost.</p><p>The camera view is mirrored. Use desktop Chrome or Edge over HTTPS. Close XRPCode before connecting the Red Board.</p></div></details>
   </section>
@@ -270,7 +290,7 @@ summary { cursor: pointer; width: fit-content; }
 <aside id="mascot" aria-label="Hoot rover companion"></aside>
 <script defer src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-<script defer src="phone-link.js?v=1"></script>
+<script defer src="phone-link.js?v=2"></script>
 <script>
   // The XRP's Bluetooth REPL uses the Nordic UART service.
   const XRP_UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
@@ -597,6 +617,7 @@ summary { cursor: pointer; width: fit-content; }
   let generation = 0;
   let hidden = document.hidden;
   let stream, tracker, recognition, restartSpeech;
+  let cameraRequest = null, cameraEpoch = 0;
   let trackingError = "", voiceLabel = "Mic off";
   let voicePackInstalling = false;
   let face, previousFrame = -1, lastSample = 0, calibration = [], neutral = null;
@@ -723,10 +744,15 @@ summary { cursor: pointer; width: fit-content; }
     document.body.dataset.connected = String(socket.ready);
     document.body.dataset.face = String(Boolean(enabled && hasFace));
     byId("stop").disabled = !socket.ready;
-    byId("tracking-status").textContent = !enabled ? "Camera off" : trackingError ? "Tracking paused" : !stream ? "Starting camera" : !tracker ? "Loading tracker" : !hasFace ? "Face lost" : neutral === null ? "Centering" : "Tracking";
+    byId("tracking-status").textContent = !enabled
+      ? cameraRequest ? "Starting camera" : stream ? "Preview on" : "Camera off"
+      : trackingError ? "Tracking paused" : !stream ? "Starting camera" : !tracker ? "Loading tracker" : !hasFace ? "Face lost" : neutral === null ? "Centering" : "Tracking";
     byId("telemetry-status").textContent = report ? "Live" : socket.ready ? "Waiting for data" : "No data";
-    byId("camera-empty-title").textContent = trackingError ? "Camera unavailable" : enabled ? "Starting camera" : "Camera off";
-    byId("camera-instruction").textContent = trackingError || (enabled ? "Allow camera access. Keep your face in view." : socket.ready ? "Enable steering to start your camera and mic." : "Connect the Red Board, then enable steering.");
+    byId("camera-empty-title").textContent = trackingError ? "Camera unavailable" : enabled || cameraRequest ? "Starting camera" : "Camera off";
+    byId("camera-instruction").textContent = trackingError || (enabled || cameraRequest ? "Allow camera access." : "Start the laptop camera to preview it here.");
+    byId("camera-note").hidden = Boolean(stream && !cameraRequest);
+    byId("laptop-preview").hidden = enabled || Boolean(cameraRequest);
+    byId("laptop-preview-actions").hidden = enabled || !stream || Boolean(cameraRequest);
     byId("camera-guidance").textContent = enabled && neutral === null ? "Look straight at the camera. Hold still to center." : "Look straight to center. Turn your head to steer.";
   }
 
@@ -1126,7 +1152,7 @@ summary { cursor: pointer; width: fit-content; }
         continue;
       }
       if (phrase === "start intercom" && phoneLink?.open) {
-        byId("phone-panel").open = true;
+        showCamera("phone");
         void phoneLink.startIntercom();
         return;
       }
@@ -1271,20 +1297,97 @@ summary { cursor: pointer; width: fit-content; }
     lastFinalVoiceIndex = lastInterimVoiceIndex = ignoredVoiceIndex = -1;
     voicePackInstalling = false;
     closeRecognition();
-    if (stream) stream.getTracks().forEach(track => track.stop());
-    stream = null;
+    releaseLaptopCamera();
     if (tracker) tracker.close();
     tracker = null;
-    video.srcObject = null;
     face = null;
     previousFrame = -1;
     voiceLabel = "Mic off";
     byId("heard").textContent = "—";
     voiceFeedback("");
-    byId("camera-note").hidden = false;
     draw(null);
     calibrate();
     render();
+  }
+
+  function releaseLaptopCamera() {
+    cameraEpoch++;
+    cameraRequest = null;
+    const camera = stream;
+    stream = null;
+    video.srcObject = null;
+    camera?.getTracks().forEach(track => track.stop());
+  }
+
+  function openLaptopCamera() {
+    if (cameraRequest) return cameraRequest;
+    if (stream) return Promise.resolve(stream);
+    const epoch = cameraEpoch;
+    const request = (async () => {
+      const camera = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {facingMode: "user", width: {ideal: 640}, height: {ideal: 400}, frameRate: {ideal: 60, max: 60}},
+      });
+      if (epoch !== cameraEpoch) {
+        camera.getTracks().forEach(track => track.stop());
+        return null;
+      }
+      stream = camera;
+      video.srcObject = camera;
+      try { await video.play(); }
+      catch (error) {
+        if (stream === camera) releaseLaptopCamera();
+        throw error;
+      }
+      if (stream !== camera) return null;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      camera.getVideoTracks()[0].addEventListener("ended", () => {
+        if (stream !== camera) return;
+        releaseLaptopCamera();
+        face = null;
+        trackingError = "Camera disconnected";
+        stopMotion();
+        render();
+      });
+      return camera;
+    })();
+    cameraRequest = request;
+    const finish = () => {
+      if (cameraRequest === request) cameraRequest = null;
+      render();
+    };
+    void request.then(finish, finish);
+    return request;
+  }
+
+  async function previewLaptopCamera() {
+    if (enabled || stream || cameraRequest) return;
+    trackingError = "";
+    const pending = openLaptopCamera();
+    render();
+    try { await pending; }
+    catch (_) {
+      if (!enabled && !stream) {
+        trackingError = "Camera permission denied or unavailable";
+        render();
+      }
+    }
+  }
+
+  function showCamera(name) {
+    for (const view of ["laptop", "phone"]) {
+      const active = view === name;
+      const tab = byId(view + "-tab");
+      const panel = byId(view + "-panel");
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+      panel.dataset.active = String(active);
+      panel.setAttribute("aria-hidden", String(!active));
+      panel.inert = !active;
+    }
+    byId("tracking-status").hidden = name !== "laptop";
+    byId("phone-badge").hidden = name !== "phone";
   }
 
   async function enable() {
@@ -1298,28 +1401,8 @@ summary { cursor: pointer; width: fit-content; }
     void startVoice(token);
     render();
     try {
-      const camera = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {facingMode: "user", width: {ideal: 640}, height: {ideal: 400}, frameRate: {ideal: 60, max: 60}},
-      });
-      if (!enabled || generation !== token) {
-        camera.getTracks().forEach(track => track.stop());
-        return;
-      }
-      stream = camera;
-      video.srcObject = camera;
-      await video.play();
-      if (generation !== token) return;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      byId("camera-note").hidden = true;
-      camera.getVideoTracks()[0].addEventListener("ended", () => {
-        if (generation !== token) return;
-        face = null;
-        trackingError = "Camera disconnected";
-        stopMotion();
-        render();
-      });
+      const camera = await openLaptopCamera();
+      if (!camera || !enabled || generation !== token) return;
       await prepareTracker(token);
       if (enabled && generation === token) requestAnimationFrame(() => void track(token));
     } catch (_) {
@@ -1384,8 +1467,7 @@ summary { cursor: pointer; width: fit-content; }
     render();
   });
   window.addEventListener("pagehide", () => {
-    discardVoiceDraft();
-    stopMotion();
+    disable();
     phoneLink?.close();
   });
   document.addEventListener("keydown", event => {
@@ -1393,6 +1475,26 @@ summary { cursor: pointer; width: fit-content; }
       latchStop();
       voiceFeedback("Command: stop · Esc");
     }
+  });
+  for (const name of ["laptop", "phone"]) {
+    const tab = byId(name + "-tab");
+    tab.addEventListener("click", () => {
+      showCamera(name);
+      if (name === "laptop") void previewLaptopCamera();
+    });
+    tab.addEventListener("keydown", event => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? "laptop" : event.key === "End" ? "phone" : name === "laptop" ? "phone" : "laptop";
+      showCamera(next);
+      byId(next + "-tab").focus();
+    });
+  }
+  byId("laptop-preview").addEventListener("click", () => void previewLaptopCamera());
+  byId("laptop-preview-stop").addEventListener("click", () => {
+    if (enabled) return;
+    releaseLaptopCamera();
+    render();
   });
   render();
   setInterval(() => step(), 32);
@@ -1408,8 +1510,11 @@ summary { cursor: pointer; width: fit-content; }
     const renderPhone = link => {
       const showLink = !!(link.link && !link.open);
       byId("phone-status").textContent = link.status;
+      byId("phone-badge").textContent = link.hasVideo ? "Phone camera live" : link.open ? "Connecting video" : "Phone offline";
+      byId("phone-camera-note").hidden = link.hasVideo;
+      pairButton.textContent = link.savedPairing ? "Listen for phone" : "Create phone link";
       pairButton.hidden = !!(link.peer || link.starting);
-      byId("phone-disconnect").hidden = !(link.peer || link.starting);
+      byId("phone-disconnect").hidden = !link.data;
       byId("phone-pair-link").hidden = !showLink;
       const url = byId("phone-url");
       if (url.value !== (showLink ? link.link : "")) url.value = showLink ? link.link : "";
@@ -1451,19 +1556,23 @@ summary { cursor: pointer; width: fit-content; }
       },
     });
     pairButton.addEventListener("click", () => void phoneLink.start());
-    byId("phone-disconnect").addEventListener("click", () => phoneLink.close());
+    byId("phone-disconnect").addEventListener("click", () => phoneLink.disconnectPhone());
     byId("phone-call").addEventListener("click", () => void phoneLink.startIntercom());
     byId("phone-hangup").addEventListener("click", () => phoneLink.endIntercom());
     byId("phone-audio-play").addEventListener("click", () => void phoneLink.playAudio());
     byId("phone-copy").addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(phoneLink.link);
-        byId("phone-status").textContent = "Link copied. Open it in Safari on your iPhone.";
+        byId("phone-status").textContent = "Link copied. Open it on your phone and bookmark it.";
       } catch (_) {
         byId("phone-url").select();
       }
     });
     renderPhone(phoneLink);
+    if (phoneLink.savedPairing) void phoneLink.start();
+  });
+  window.addEventListener("pageshow", event => {
+    if (event.persisted && phoneLink?.savedPairing) void phoneLink.start();
   });
 </script>
 <script src="mascot.js?v=c33a4f9f7541"></script>

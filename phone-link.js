@@ -3,6 +3,15 @@
   "use strict";
 
   const stopTracks = stream => stream?.getTracks().forEach(track => track.stop());
+  const PAIRING_STORAGE = "lookout-rover.phone-pairing.v1";
+
+  function loadPairing() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(PAIRING_STORAGE));
+      if (/^lookout-[a-f0-9-]{36}$/.test(saved?.id) && /^[a-f0-9-]{36}$/.test(saved?.token)) return saved;
+    } catch (_) {}
+    return null;
+  }
 
   class RoverPhoneLink {
     constructor({role, video, audio, onChange, beforeIntercom, afterIntercom}) {
@@ -14,11 +23,29 @@
       this.audioBlocked = false;
       this.epoch = 0;
       this.intercomEpoch = 0;
+      this.savedPairing = role === "operator" ? loadPairing() : null;
+      if (this.savedPairing) this.setLink(this.savedPairing);
     }
 
     change(status) {
       if (status) this.status = status;
       this.onChange?.(this);
+    }
+
+    setLink({id, token}) {
+      const url = new URL("rover-phone.html", window.location.href);
+      url.hash = new URLSearchParams({id, key: token}).toString();
+      this.link = url.href;
+    }
+
+    getOperatorPairing() {
+      if (!this.savedPairing) {
+        const pairing = {id: "lookout-" + crypto.randomUUID(), token: crypto.randomUUID()};
+        window.localStorage.setItem(PAIRING_STORAGE, JSON.stringify(pairing));
+        this.savedPairing = pairing;
+      }
+      this.setLink(this.savedPairing);
+      return this.savedPairing;
     }
 
     async start(pairing) {
@@ -37,7 +64,7 @@
       }
       const epoch = ++this.epoch;
       this.starting = true;
-      this.change(this.role === "phone" ? "Opening the rear camera…" : "Creating a private pairing link…");
+      this.change(this.role === "phone" ? "Opening the rear camera…" : "Opening the phone connection…");
       let phase = "pair";
       try {
         if (this.role === "phone") {
@@ -58,31 +85,38 @@
             });
           }
           phase = "pair";
-        } else {
-          this.token = crypto.randomUUID();
         }
-        const peer = new window.Peer({secure: true});
+        let peer;
+        if (this.role === "operator") {
+          phase = "storage";
+          const saved = this.getOperatorPairing();
+          this.token = saved.token;
+          phase = "pair";
+          peer = new window.Peer(saved.id, {secure: true});
+        } else {
+          peer = new window.Peer({secure: true});
+        }
         this.peer = peer;
         peer.on("error", error => {
           if (this.peer !== peer) return;
-          this.close(error.type === "peer-unavailable"
-            ? "The pairing link expired. Make a new one on the laptop."
-            : "Could not connect to the phone. Check the network and pair again.");
+          const note = {
+            "peer-unavailable": "Open Lookout Rover on the laptop, then start the rear camera again using this same link.",
+            "unavailable-id": "This phone link is open in another Lookout Rover tab. Close that tab, then click Listen for phone.",
+          }[error.type];
+          this.close(note || "Could not connect. Check your network, then retry with the same link.");
         });
         peer.on("disconnected", () => {
           if (this.peer === peer && !this.open) {
-            this.close("Connection service disconnected. Make a new pairing link.");
+            this.close(this.role === "operator"
+              ? "Connection service disconnected. Click Listen for phone to retry with the same link."
+              : "Connection service disconnected. Start the rear camera again.");
           }
         });
-        peer.on("open", id => {
+        peer.on("open", () => {
           if (this.peer !== peer) return;
           if (this.role === "operator") {
-            const url = new URL("rover-phone.html", window.location.href);
-            url.hash = new URLSearchParams({id, key: this.token}).toString();
-            this.link = url.href;
             clearTimeout(this.pairTimer);
-            this.pairTimer = setTimeout(() => this.close("Pairing link expired. Make a new one."), 300000);
-            this.change("Scan the QR code with your iPhone.");
+            this.change("Listening for your phone. Scan the QR code or open your bookmarked link.");
           } else {
             this.change("Connecting to the operator…");
             this.bindData(peer.connect(this.hostId, {reliable: true, metadata: {token: this.token}}));
@@ -95,7 +129,7 @@
             return;
           }
           clearTimeout(this.pairTimer);
-          this.pairTimer = setTimeout(() => this.close("Pairing timed out. Make a new pairing link."), 20000);
+          this.pairTimer = setTimeout(() => this.disconnectPhone("Phone connection timed out. Retry the same link."), 20000);
           this.bindData(data);
         });
         peer.on("call", call => this.answer(call));
@@ -104,8 +138,11 @@
         this.change();
       } catch (_) {
         if (epoch === this.epoch) {
-          this.close(phase === "camera" ? "Camera unavailable. Allow Safari to use the camera and try again."
-            : "Could not create the pairing session. Check the network and try again.");
+          const note = {
+            camera: "Camera unavailable. Allow Safari to use the camera and try again.",
+            storage: "Use a browser profile that allows site storage to save your phone link.",
+          }[phase];
+          this.close(note || "Could not start the connection. Check the network and retry.");
         }
       }
     }
@@ -124,7 +161,7 @@
         if (this.data === data) this.handle(message);
       });
       const lost = () => {
-        if (this.data === data) this.close("Phone disconnected. Pair again to reconnect.");
+        if (this.data === data) this.disconnectPhone();
       };
       data.on("error", lost);
       data.on("close", lost);
@@ -136,7 +173,7 @@
         this.data.send({type});
         return true;
       } catch (_) {
-        this.close("Phone disconnected. Pair again to reconnect.");
+        this.disconnectPhone();
         return false;
       }
     }
@@ -171,7 +208,7 @@
           call.close();
         }
       } catch (_) {
-        if (call === this.cameraCall) this.close("Could not open the rover video. Pair again.");
+        if (call === this.cameraCall) this.disconnectPhone("Could not open the rover video. Retry the same link.");
         else if (call === this.audioCall) this.endIntercom(true, "Could not open intercom audio. Try again.");
       }
     }
@@ -187,7 +224,7 @@
         });
       }
       const ended = () => {
-        if (this.cameraCall === call) this.close("Rover video disconnected. Pair again to reconnect.");
+        if (this.cameraCall === call) this.disconnectPhone("Rover video disconnected. Reopen the same phone link.");
       };
       call.on("error", ended);
       call.on("close", ended);
@@ -210,7 +247,7 @@
         case "paired":
           if (this.role === "phone" && this.camera && !this.cameraCall) {
             try { this.bindCamera(this.makeCall("camera", this.camera)); }
-            catch (_) { this.close("Could not start video. Pair the phone again."); }
+            catch (_) { this.close("Could not start video. Retry with the same link."); }
           }
           break;
         case "intercom-request":
@@ -309,22 +346,36 @@
       this.change();
     }
 
-    close(status) {
+    disconnectPhone(status) {
+      if (this.role !== "operator" || !this.peer?.open || this.peer.disconnected) {
+        this.close(status);
+        return;
+      }
+      this.releaseStreams();
+      this.change(status || "Phone disconnected. The same link is ready to reconnect.");
+    }
+
+    releaseStreams() {
       this.epoch++;
       clearTimeout(this.pairTimer);
       clearTimeout(this.cameraTimer);
       this.starting = false;
       this.open = false;
       this.hasVideo = false;
-      this.link = "";
-      const {peer, data, cameraCall, camera} = this;
-      this.peer = this.data = this.cameraCall = this.camera = null;
+      const {data, cameraCall, camera} = this;
+      this.data = this.cameraCall = this.camera = null;
       this.endIntercom(false);
       cameraCall?.close();
       data?.close();
-      peer?.destroy();
       stopTracks(camera);
       this.video.srcObject = null;
+    }
+
+    close(status) {
+      const peer = this.peer;
+      this.peer = null;
+      this.releaseStreams();
+      peer?.destroy();
       this.change(status || (this.role === "operator" ? "Phone disconnected." : "Camera off."));
     }
   }
