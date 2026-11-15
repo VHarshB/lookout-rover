@@ -32,7 +32,6 @@
   <p id="connection" role="status">Scan the pairing QR code from the Lookout Rover console.</p>
   <div class="actions">
     <button id="start" class="primary" type="button" hidden>Start rear camera</button>
-    <button id="disconnect" type="button" hidden>Disconnect phone</button>
   </div>
   <section aria-labelledby="intercom-label">
     <h2 id="intercom-label">Intercom</h2>
@@ -46,7 +45,7 @@
   </section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
-<script src="phone-link.js?v=2"></script>
+<script src="phone-link.js?v=4"></script>
 <script>
   const byId = id => document.getElementById(id);
   const params = new URLSearchParams(location.hash.slice(1));
@@ -56,8 +55,7 @@
 
   function render(link) {
     byId("connection").textContent = link.status;
-    byId("start").hidden = !valid || !!(link.peer || link.starting);
-    byId("disconnect").hidden = !(link.peer || link.starting);
+    byId("start").hidden = !valid || !!(link.camera || link.peer || link.starting || link.retryTimer);
     byId("accept").hidden = link.intercom !== "incoming";
     byId("end").hidden = link.intercom === "off";
     byId("end").textContent = link.intercom === "incoming" ? "Decline" : "End intercom";
@@ -76,12 +74,15 @@
     });
     if (!valid) link.status = "Scan the pairing QR code from the Lookout Rover console.";
     byId("start").addEventListener("click", () => void link.start({id, token}));
-    byId("disconnect").addEventListener("click", () => link.close());
     byId("accept").addEventListener("click", () => void link.startIntercom());
     byId("end").addEventListener("click", () => link.endIntercom());
     byId("play").addEventListener("click", () => void link.playAudio());
     window.addEventListener("pagehide", () => link.close());
+    window.addEventListener("pageshow", event => {
+      if (event.persisted && valid) void link.start({id, token});
+    });
     render(link);
+    if (valid) void link.start({id, token});
   } else {
     byId("connection").textContent = "Phone service could not load. Refresh the page.";
   }

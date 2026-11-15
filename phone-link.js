@@ -16,7 +16,6 @@
     const signature = await crypto.subtle.sign("HMAC", key, text.encode(username));
     const credential = btoa(String.fromCharCode(...new Uint8Array(signature)));
     return {secure: true, config: {
-      iceTransportPolicy: "relay",
       iceServers: [{
         urls: [
           "turn:" + host + ":443?transport=tcp",
@@ -25,7 +24,7 @@
         ],
         username,
         credential,
-      }],
+      }, ...(window.peerjs?.util?.defaultConfig?.iceServers ?? [{urls: "stun:stun.l.google.com:19302"}])],
     }};
   }
 
@@ -74,6 +73,8 @@
 
     async start(pairing) {
       if (this.peer || this.starting) return;
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
         this.change("Open this page over HTTPS to use the camera and mic.");
         return;
@@ -88,12 +89,17 @@
       }
       const epoch = ++this.epoch;
       this.starting = true;
-      this.change(this.role === "phone" ? "Opening the rear camera…" : "Opening the phone connection…");
+      this.change(this.role === "phone"
+        ? this.camera ? "Rear camera on · reconnecting…" : "Opening the rear camera…"
+        : "Opening the phone connection…");
       let phase = "pair";
       try {
         if (this.role === "phone") {
           this.token = pairing.token;
           this.hostId = pairing.id;
+          this.phonePairing = pairing;
+        }
+        if (this.role === "phone" && !this.camera) {
           phase = "camera";
           const stream = await navigator.mediaDevices.getUserMedia({
             video: {facingMode: {ideal: "environment"}, width: {ideal: 640}, height: {ideal: 360}, frameRate: {ideal: 24, max: 30}},
@@ -123,26 +129,26 @@
         this.peer = peer;
         peer.on("error", error => {
           if (this.peer !== peer) return;
-          const note = {
-            "peer-unavailable": "Open Lookout Rover on the laptop, then start the rear camera again using this same link.",
-            "unavailable-id": "This phone link is open in another Lookout Rover tab. Close that tab, then click Listen for phone.",
-          }[error.type];
-          this.close(note || "Could not connect. Check your network, then retry with the same link.");
+          if (error.type === "unavailable-id") {
+            this.close("This phone link is open in another Lookout Rover tab. Close that tab, then click Listen for phone.");
+            return;
+          }
+          this.retryConnection(error.type === "peer-unavailable"
+            ? "Open Lookout Rover on the laptop."
+            : "Network interrupted.");
         });
         peer.on("disconnected", () => {
           if (this.peer === peer && !this.open) {
-            this.close(this.role === "operator"
-              ? "Connection service disconnected. Click Listen for phone to retry with the same link."
-              : "Connection service disconnected. Start the rear camera again.");
+            this.retryConnection("Connection service interrupted.");
           }
         });
         peer.on("open", () => {
           if (this.peer !== peer) return;
           if (this.role === "operator") {
             clearTimeout(this.pairTimer);
-            this.change("Listening for your phone via free relay. Open your bookmarked link.");
+            this.change("Listening for your phone · auto-reconnect on");
           } else {
-            this.change("Connecting to the operator via free relay…");
+            this.change("Rear camera on · connecting to the operator…");
             this.bindData(peer.connect(this.hostId, {reliable: true, metadata: {token: this.token}}));
           }
         });
@@ -153,11 +159,11 @@
             return;
           }
           clearTimeout(this.pairTimer);
-          this.pairTimer = setTimeout(() => this.disconnectPhone("The phone reached this console, but the relay connection timed out."), 28000);
+          this.pairTimer = setTimeout(() => this.disconnectPhone("Still waiting for the phone’s network connection…"), 28000);
           this.bindData(data);
         });
         peer.on("call", call => this.answer(call));
-        this.pairTimer = setTimeout(() => this.close("Relay connection timed out. Retry using the same link."), 30000);
+        this.pairTimer = setTimeout(() => this.retryConnection("Network is slow."), 30000);
         this.starting = false;
         this.change();
       } catch (_) {
@@ -166,7 +172,8 @@
             camera: "Camera unavailable. Allow Safari to use the camera and try again.",
             storage: "Use a browser profile that allows site storage to save your phone link.",
           }[phase];
-          this.close(note || "Could not start the connection. Check the network and retry.");
+          if (note) this.close(note);
+          else this.retryConnection("Could not start the network connection.");
         }
       }
     }
@@ -206,7 +213,7 @@
       clearTimeout(this.cameraTimer);
       this.cameraTimer = setTimeout(() => {
         if (this.open && !this.hasVideo) {
-          this.change("Paired, but video could not connect. Try both devices on one hotspot.");
+          this.disconnectPhone("Pairing is ready. Reconnecting video…");
         }
       }, 18000);
     }
@@ -261,6 +268,7 @@
 
     markVideoLive() {
       this.hasVideo = true;
+      this.retryCount = 0;
       clearTimeout(this.cameraTimer);
       this.change(this.role === "phone" ? "Rear camera live" : "Rover camera live");
     }
@@ -271,7 +279,7 @@
         case "paired":
           if (this.role === "phone" && this.camera && !this.cameraCall) {
             try { this.bindCamera(this.makeCall("camera", this.camera)); }
-            catch (_) { this.close("Could not start video. Retry with the same link."); }
+            catch (_) { this.retryConnection("Could not start video."); }
           }
           break;
         case "intercom-request":
@@ -371,15 +379,27 @@
     }
 
     disconnectPhone(status) {
-      if (this.role !== "operator" || !this.peer?.open || this.peer.disconnected) {
-        this.close(status);
+      if (this.role === "phone" || !this.peer?.open || this.peer.disconnected) {
+        this.retryConnection(status || "Connection interrupted.");
         return;
       }
       this.releaseStreams();
       this.change(status || "Phone disconnected. The same link is ready to reconnect.");
     }
 
-    releaseStreams() {
+    retryConnection(note) {
+      const pairing = this.phonePairing;
+      const delay = Math.min(8000, 1500 * 2 ** Math.min(this.retryCount ?? 0, 3));
+      this.retryCount = (this.retryCount ?? 0) + 1;
+      this.close(note + " Retrying automatically…", this.role === "phone");
+      this.retryTimer = setTimeout(() => {
+        this.retryTimer = null;
+        void this.start(pairing);
+      }, delay);
+      this.change();
+    }
+
+    releaseStreams(keepCamera = false) {
       this.epoch++;
       clearTimeout(this.pairTimer);
       clearTimeout(this.cameraTimer);
@@ -387,18 +407,23 @@
       this.open = false;
       this.hasVideo = false;
       const {data, cameraCall, camera} = this;
-      this.data = this.cameraCall = this.camera = null;
+      this.data = this.cameraCall = null;
       this.endIntercom(false);
       cameraCall?.close();
       data?.close();
-      stopTracks(camera);
-      this.video.srcObject = null;
+      if (!keepCamera) {
+        this.camera = null;
+        stopTracks(camera);
+        this.video.srcObject = null;
+      }
     }
 
-    close(status) {
+    close(status, keepCamera = false) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
       const peer = this.peer;
       this.peer = null;
-      this.releaseStreams();
+      this.releaseStreams(keepCamera);
       peer?.destroy();
       this.change(status || (this.role === "operator" ? "Phone disconnected." : "Camera off."));
     }

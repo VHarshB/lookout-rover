@@ -290,7 +290,7 @@ summary { cursor: pointer; width: fit-content; }
 <aside id="mascot" aria-label="Hoot rover companion"></aside>
 <script defer src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-<script defer src="phone-link.js?v=2"></script>
+<script defer src="phone-link.js?v=4"></script>
 <script>
   // The XRP's Bluetooth REPL uses the Nordic UART service.
   const XRP_UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
@@ -1513,7 +1513,7 @@ summary { cursor: pointer; width: fit-content; }
       byId("phone-badge").textContent = link.hasVideo ? "Phone camera live" : link.open ? "Connecting video" : "Phone offline";
       byId("phone-camera-note").hidden = link.hasVideo;
       pairButton.textContent = link.savedPairing ? "Listen for phone" : "Create phone link";
-      pairButton.hidden = !!(link.peer || link.starting);
+      pairButton.hidden = !!(link.peer || link.starting || link.retryTimer);
       byId("phone-disconnect").hidden = !link.data;
       byId("phone-pair-link").hidden = !showLink;
       const url = byId("phone-url");
