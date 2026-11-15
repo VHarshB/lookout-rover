@@ -1,4 +1,4 @@
-﻿# Steering investigation and bench check
+# Steering investigation and bench check
 
 Starting point: main 652909c, matching origin/main.
 
@@ -47,3 +47,18 @@ POWER_OFF/WHEELS_STALLED/COMMAND_LOST and investigate actual receipt and motors.
 
 Pending live verification: webcam/MediaPipe timing, Bluetooth/USB command
 receipt, ZEROED/telemetry, power/encoders, wheel direction, Stop and watchdog.
+
+
+## Response tuning
+
+Tracking now prefers main-thread GPU at startup, retaining CPU fallback on
+failure. Changed-target dispatch minimum is 16 ms (previously 31); heartbeat
+is 80 ms (previously 115). BLE writes remain serialized and intermediate
+unsent targets are not queued. Telemetry retains its 250 ms priority bound.
+Angle smoothing time constants are 6/18 ms (previously 12/35); feed-forward
+drops old directional momentum immediately on reversal. No predictive angle,
+motor effort increase, or firmware gain change was introduced.
+
+Mock test confirms a 16 ms reversal follows over 92% of the angle change and
+reverses feed-forward immediately. This is software-filter response, not
+measured end-to-end rover latency. Repeat the lifted-wheel bench check.

@@ -54,6 +54,10 @@ try:
    assert result["cancelled"] and result["stopped"],(scenario,result)
    page.wait_for_timeout(20)
   checks.append("Stop, lost face, hidden tab, stale data, obstacle and no echo stop motion")
+  page.evaluate("""()=>{neutral=0;filteredYaw=faceAngle=25;faceRate=100;lastControlPose=performance.now()-16;acceptPose({yaw:-25,box:[.2,.2,.7,.8]},performance.now())}""")
+  assert page.evaluate("faceAngle < -21 && faceRate < 0")
+  checks.append("16 ms reversal follows over 92% of head-angle change and immediately reverses feed-forward")
+
   page.evaluate("""()=>{socket.session.transmit.writeValueWithResponse=async()=>{throw new Error("test write failure")};socket.send(JSON.stringify({kind:"aim",angle:20,base:0,rate:0}))}""")
   page.wait_for_function("socket.session===null")
   checks.append("BLE write rejection closes connection and disables steering")

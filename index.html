@@ -780,7 +780,7 @@ summary { cursor: pointer; width: fit-content; }
     // Fresh movement gets the next free BLE slot. Once a poll is 250 ms due,
     // reserve the next free slot for telemetry; stale-data limits stay unchanged.
     if (!voiceUpdate && socket.ready && now - lastPoll >= 165 && socket.bufferedAmount === 0
-        && (!canMove(now) || now - lastPoll >= 250 || now - lastMotionAt < 31)) {
+        && (!canMove(now) || now - lastPoll >= 250 || now - lastMotionAt < 16)) {
       send("status");
       lastPoll = now;
     }
@@ -827,7 +827,7 @@ summary { cursor: pointer; width: fit-content; }
     const rate = now - lastControlPose < 110 ? Math.round(clamp(faceRate, MAX_RATE)) : 0;
     const packet = angle.toFixed(1) + " " + base.toFixed(2) + " " + rate;
     if (socket.bufferedAmount === 0 && (
-      voiceUpdate || now - lastMotionAt >= 115 || (packet !== lastMotion && now - lastMotionAt >= 31)
+      voiceUpdate || now - lastMotionAt >= 80 || (packet !== lastMotion && now - lastMotionAt >= 16)
     )) {
       send("aim", {angle, base, rate});
       lastMotionAt = now;
@@ -986,12 +986,13 @@ summary { cursor: pointer; width: fit-content; }
     const dt = lastControlPose ? Math.max(12, at - lastControlPose) : TRACK_MS;
     // Time-based smoothing follows quick turns/reversals without the old tail,
     // while still damping small steady-pose jitter at any camera frame rate.
-    const responseMs = Math.abs(raw - filteredYaw) > 4 ? 12 : 35;
+    const responseMs = Math.abs(raw - filteredYaw) > 2 ? 6 : 18;
     const alpha = 1 - Math.exp(-dt / responseMs);
     filteredYaw += alpha * (raw - filteredYaw);
     const next = Math.abs(filteredYaw) < 2 ? 0 : clamp(filteredYaw, MAX_YAW);
     const rate = dt > FACE_TIMEOUT ? 0 : clamp((next - faceAngle) * 1000 / dt, MAX_RATE);
-    faceRate = 0.60 * rate + 0.40 * faceRate;
+    // Drop the previous direction immediately on reversal; avoid stale turn feed-forward.
+    faceRate = rate * faceRate < 0 ? rate : 0.85 * rate + 0.15 * faceRate;
     if (next === 0 && Math.abs(rate) < 3) faceRate = 0;
     faceAngle = next;
     lastControlPose = at;
@@ -1057,7 +1058,7 @@ summary { cursor: pointer; width: fit-content; }
     scheduleTracking(token);
   }
 
-  async function prepareTracker(token, useWorker = true, useGpu = true) {
+  async function prepareTracker(token, useWorker = false, useGpu = true) {
     try {
       const result = await makeTracker(useWorker, useGpu);
       if (generation === token && enabled && stream) {
