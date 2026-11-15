@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#100f1c">
+<meta name="theme-color" content="#211a36">
 <meta name="description" content="Lookout Rover operator console. Live head steering, voice control, and rover telemetry.">
 <title>Lookout Rover · Operator console</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 32'%3E%3Cpath d='M4 8Q8 34 28 19L4 8Zm56 0Q56 34 36 19L60 8Z' fill='none' stroke='%23e6d6fa' stroke-width='4'/%3E%3C/svg%3E">
@@ -12,9 +12,9 @@
 <style>
 @font-face { font-family: 'Instrument Sans'; src: url('assets/fonts/instrument-sans.ttf') format('truetype'); font-weight: 400 700; font-display: swap; }
 @font-face { font-family: 'IBM Plex Mono'; src: url('assets/fonts/ibm-plex-mono.ttf') format('truetype'); font-weight: 400; font-display: swap; }
-:root { color-scheme: dark; font-family: 'Instrument Sans', 'Segoe UI', sans-serif; color: #f5f3fc; background: #100f1c; --muted: #b8b5c9; --lavender: #e6d6fa; --mint: #b6fab7; }
+:root { color-scheme: dark; font-family: 'Instrument Sans', 'Segoe UI', sans-serif; color: #f5f3fc; background: #211a36; --muted: #cec8df; --lavender: #e6d6fa; --mint: #b6fab7; }
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse 53vw 90vh at -5vw 100vh, #4a3678 0%, #422d64 25%, transparent 78%), linear-gradient(110deg, #171223, #100f1c 56%, #0f0d1d); background-attachment: fixed; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse 70vw 95vh at -5vw 100vh, #8056c5 0%, #57378c 30%, transparent 80%), radial-gradient(ellipse 65vw 75vh at 100% 0%, #373773 0%, transparent 78%), linear-gradient(115deg, #2b2046, #211a36 58%, #2b1d46); background-attachment: fixed; }
 main { width: min(88.8vw, 1408px); margin: auto; }
 h1, h2, h3, p, dl, dd { margin: 0; }
 button, summary { -webkit-tap-highlight-color: transparent; }
@@ -127,7 +127,7 @@ summary { cursor: pointer; width: fit-content; }
   .voice-panel { margin-top: 48px; }
 }
 @media (max-width: 900px) {
-  body { background: radial-gradient(ellipse 120% 75% at -20% 100%, #45316d 0%, transparent 80%), #100f1c; background-attachment: scroll; }
+  body { background: radial-gradient(ellipse 150% 80% at -20% 100%, #7950b9 0%, transparent 85%), radial-gradient(ellipse 120% 55% at 110% 0%, #34366d 0%, transparent 80%), #211a36; background-attachment: scroll; }
   main { width: calc(100% - 40px); }
   .masthead { height: auto; min-height: 100px; padding: 24px 0 20px; flex-wrap: wrap; gap: 20px; }
   .brand { padding-left: 0; gap: 15px; }
@@ -141,7 +141,7 @@ summary { cursor: pointer; width: fit-content; }
   .motion-panel { order: 0; width: 100%; min-height: 105px; }
   #state { font-size: 36px; min-height: 65px; margin-top: 8px; }
   #state[data-long='true'] { font-size: 29px; }
-  .steering-actions { order: 1; width: 100%; gap: 12px; position: sticky; top: 10px; z-index: 5; background: #12101ef2; box-shadow: 0 0 0 7px #12101ef2; border-radius: 13px; }
+  .steering-actions { order: 1; width: 100%; gap: 12px; position: sticky; top: 10px; z-index: 5; background: #241c3cf5; box-shadow: 0 0 0 7px #241c3cf5; border-radius: 13px; }
   #stop { flex-basis: 140px; }
   #enable { padding-inline: 12px; font-size: 18px; }
   .camera-panel { order: 2; width: 100%; }
