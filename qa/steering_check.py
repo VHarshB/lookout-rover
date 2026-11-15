@@ -72,6 +72,8 @@ try:
   assert not page.evaluate("applyVoiceCommand('resume','test')")
   page.evaluate("latestStatus={heading:0,distance:62,reason:'STOPPED',at:performance.now()};step()")
   assert page.evaluate("voiceStop && motorFault!==null")
+  assert page.locator("#state").inner_text()=="Stopped"
+  assert "restored" in page.locator("#state-detail").inner_text()
   assert page.evaluate("applyVoiceCommand('resume','test') && !voiceStop && motorFault===null")
   page.evaluate("latestStatus.reason='WHEELS_STALLED';step()")
   assert page.evaluate("voiceStop && motorFault==='Wheels not moving'")

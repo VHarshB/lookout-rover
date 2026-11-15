@@ -722,7 +722,7 @@ summary { cursor: pointer; width: fit-content; }
     let reason;
     if (!socket.ready) reason = connecting ? "Connecting" : "Red Board disconnected";
     else if (!enabled) reason = "Steering off";
-    else if (motorFault) reason = motorFault;
+    else if (motorFault) reason = !report ? "Waiting for rover data" : report.reason === "POWER_OFF" ? "Motor power off" : report.reason === "WHEELS_STALLED" ? "Wheels not moving" : "Stopped";
     else if (voiceStop) reason = "Stopped";
     else if (hidden) reason = "Paused · page inactive";
     else if (trackingError) reason = "Camera unavailable";
@@ -770,6 +770,11 @@ summary { cursor: pointer; width: fit-content; }
       "Reversing": "Moving backward. Check the path behind the rover.",
     };
     byId("state-detail").textContent = trackingError && reason === "Camera unavailable" ? trackingError : guidance[reason] || "Motion paused. Check camera and browser permissions.";
+    if (motorFault && reason === "Stopped") {
+      byId("state-detail").textContent = motorFault === "Motor power off"
+        ? "Motor power restored. Stopped until you say resume."
+        : "Wheel fault cleared. Check the wheels, then say resume.";
+    }
     document.body.dataset.connected = String(socket.ready);
     document.body.dataset.face = String(Boolean(enabled && hasFace));
     byId("stop").disabled = !socket.ready;
