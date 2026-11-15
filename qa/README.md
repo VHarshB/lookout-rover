@@ -62,3 +62,30 @@ motor effort increase, or firmware gain change was introduced.
 Mock test confirms a 16 ms reversal follows over 92% of the angle change and
 reverses feed-forward immediately. This is software-filter response, not
 measured end-to-end rover latency. Repeat the lifted-wheel bench check.
+
+
+## Motor load and sensor investigation
+
+Reported physical states: Turning, Motor power off, Wheels not moving.
+These are actual controller telemetry, not proof of a tracking fault.
+The supplied firmware's motor-power check and encoder-stall detection can
+explain floor/no-load differences; actual battery voltage and wheel friction
+remain unmeasured. No effort/firmware gain increases were made.
+
+Browser feed-forward now caps at 60 degrees/s, tapers near the heading target,
+and cannot push against heading correction. This reduces unnecessary saturation
+and overshoot but cannot repair low battery voltage, loose wiring or friction.
+
+POWER_OFF and WHEELS_STALLED now latch STOP, including stationary pivots.
+Recovery does not automatically resume motor commands; say resume after the
+fault clears with fresh telemetry. Stop/Esc and disable/re-enable do not bypass
+the fault latch. Diagnostic text lists the active sensor roles.
+
+Front distance <20 cm or no echo still blocks forward motion, not stationary
+pivots/reverse. IMU drives heading control. Encoders detect stalls. The supplied
+controller does not use reflectance/line sensors. No safeguards were removed.
+
+Physical follow-up: fresh charged batteries, secure battery connector and motor
+switch, power-off inspection for wheels rubbing chassis/hair/debris/caster
+binding, then lifted-wheel test and a clear hard-floor test. Record voltage
+under load if faults recur; do not mask POWER_OFF by increasing effort.

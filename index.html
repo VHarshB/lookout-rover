@@ -634,6 +634,7 @@ summary { cursor: pointer; width: fit-content; }
   let face, previousFrame = -1, lastSample = 0, calibration = [], neutral = null;
   let filteredYaw = 0, faceAngle = 0, faceRate = 0, lastControlPose = 0, yawOffset = 0;
   let latestStatus = null, lastPoll = 0, lastMotionAt = 0, lastMotion = "";
+  let motorFault = null;
   let started = false, zeroAt = null, zeroAttempts = 0, voiceStop = false, translation = null;
   let motionBlock = null;
   let voiceDraft = null, ignoredVoiceIndex = -1, lastFinalVoiceIndex = -1, lastInterimVoiceIndex = -1;
@@ -702,6 +703,7 @@ summary { cursor: pointer; width: fit-content; }
       "Calibration: " + calibration.length + "/7 ? neutral " + (neutral === null ? "unset" : neutral.toFixed(1)),
       "Arming: " + (started ? "ZEROED received" : "waiting") + " ? attempts " + zeroAttempts,
       "Telemetry age: " + (latestStatus ? Math.round(now - latestStatus.at) + " ms ? " + latestStatus.reason : "none"),
+      "Sensors: front range blocks forward <20 cm / no echo; IMU controls heading; encoders report stall. No line sensor used.",
       "Last AIM write: " + steeringTrace.aim,
       "Last completed write: " + steeringTrace.write, "Last reply: " + steeringTrace.reply,
     ].join("\n");
@@ -714,6 +716,7 @@ summary { cursor: pointer; width: fit-content; }
     let reason;
     if (!socket.ready) reason = connecting ? "Connecting" : "Red Board disconnected";
     else if (!enabled) reason = "Steering off";
+    else if (motorFault) reason = motorFault;
     else if (voiceStop) reason = "Stopped";
     else if (hidden) reason = "Paused · page inactive";
     else if (trackingError) reason = "Camera unavailable";
@@ -752,7 +755,7 @@ summary { cursor: pointer; width: fit-content; }
       "Waiting for rover data": "Motion paused until fresh telemetry arrives.",
       "Obstacle ahead": "Forward motion blocked. Clear the path or reverse.",
       "Front sensor has no echo": "Forward motion blocked until the sensor responds.",
-      "Wheels not moving": "Check the wheels and motor power.",
+      "Wheels not moving": "Stopped. Check wheel binding and motor power. Then say resume.",
       "Motor power off": "Switch on the rover’s motor power.",
       "No steering updates": "Motion paused. Waiting for control updates.",
       "Aligned": "Turn your head to steer. Speak to move.",
@@ -776,6 +779,16 @@ summary { cursor: pointer; width: fit-content; }
     byId("camera-guidance").textContent = enabled && neutral === null ? "Look straight at the camera. Hold still to center." : "Look straight to center. Turn your head to steer.";
   }
 
+  function steeringRate(now, angle, heading) {
+    if (now - lastControlPose >= 110) return 0;
+    const error = angleDelta(angle - heading);
+    // Rate feed-forward must help close the remaining error, never continue
+    // pushing through an already reached target or fight a direction reversal.
+    if (Math.abs(error) <= 2.5 || faceRate * error <= 0) return 0;
+    const limit = Math.min(60, (Math.abs(error) - 2.5) * 6);
+    return Math.round(clamp(faceRate, limit));
+  }
+
   function step(now = performance.now(), voiceUpdate = false) {
     // Fresh movement gets the next free BLE slot. Once a poll is 250 ms due,
     // reserve the next free slot for telemetry; stale-data limits stay unchanged.
@@ -784,7 +797,12 @@ summary { cursor: pointer; width: fit-content; }
       send("status");
       lastPoll = now;
     }
-    if (!enabled || voiceStop || hidden || !socket.ready || !liveFace(now)) {
+    if (enabled && latestStatus && now - latestStatus.at <= 650 &&
+        ["POWER_OFF", "WHEELS_STALLED"].includes(latestStatus.reason) && !motorFault) {
+      motorFault = latestStatus.reason === "POWER_OFF" ? "Motor power off" : "Wheels not moving";
+      latchStop();
+    }
+    if (!enabled || voiceStop || motorFault || hidden || !socket.ready || !liveFace(now)) {
       discardVoiceDraft();
       if (enabled) stopMotion();
       render();
@@ -824,7 +842,7 @@ summary { cursor: pointer; width: fit-content; }
 
     const base = translation?.base ?? 0;
     const angle = Math.round(target() * 10) / 10;
-    const rate = now - lastControlPose < 110 ? Math.round(clamp(faceRate, MAX_RATE)) : 0;
+    const rate = steeringRate(now, angle, latestStatus.heading);
     const packet = angle.toFixed(1) + " " + base.toFixed(2) + " " + rate;
     if (socket.bufferedAmount === 0 && (
       voiceUpdate || now - lastMotionAt >= 80 || (packet !== lastMotion && now - lastMotionAt >= 16)
@@ -1113,7 +1131,7 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function canMove(now) {
-    return enabled && !hidden && socket.ready && !voiceStop && started
+    return enabled && !hidden && socket.ready && !voiceStop && !motorFault && started
       && liveFace(now) && latestStatus && now - latestStatus.at <= 650;
   }
 
@@ -1122,6 +1140,12 @@ summary { cursor: pointer; width: fit-content; }
     if (command === "stop") {
       latchStop();
     } else if (command === "resume") {
+      if (motorFault && (!latestStatus || performance.now() - latestStatus.at > 650 ||
+          latestStatus.reason === "POWER_OFF" || latestStatus.reason === "WHEELS_STALLED")) {
+        voiceFeedback("Check motor power and wheels before resuming");
+        return false;
+      }
+      motorFault = null;
       voiceStop = false;
     } else if (command === "recenter") {
       calibrate();
