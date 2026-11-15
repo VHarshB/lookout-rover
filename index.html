@@ -89,6 +89,16 @@ dd .unit { font: inherit; letter-spacing: inherit; }
 summary { cursor: pointer; width: fit-content; }
 .help-content { padding-top: 16px; }
 .help-content p+p { margin-top: 12px; }
+.transcript-log .phone-actions button { min-height: 44px; padding: .4rem .8rem; font-size: 15px; }
+#transcript-list { list-style: none; margin: .5rem 0 0; padding: 0; max-height: 22rem; overflow: auto; scrollbar-width: thin; scrollbar-color: #827192 transparent; }
+#transcript-list li { display: grid; grid-template-columns: auto auto 1fr; gap: 0 .6rem; padding: .35rem 0; border-top: 1px solid #78718a55; }
+#transcript-list time { font-family: 'IBM Plex Mono', Consolas, monospace; font-size: 13px; color: #a79fbd; }
+#transcript-list b { font-weight: 600; color: var(--lavender); }
+#transcript-list li[data-speaker='rover'] b { color: var(--mint); }
+#transcript-list li[data-speaker='rover'][data-outcome='rejected'] b { color: #ffd099; }
+#transcript-list li[data-speaker='hoot'] b { color: #dbbef5; }
+#transcript-list span { color: #f5f3fc; overflow-wrap: anywhere; }
+#transcript-list small { grid-column: 3; font-size: 12px; color: #a79fbd; }
 /* Floating companion: the owl stays unchanged; only its dock is compact. */
 #mascot { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); width: 128px; z-index: 10; }
 #mascot .lk-card { background: transparent; border: 0; border-radius: 0; padding: 0; margin: 0; overflow: visible; box-shadow: none; }
@@ -274,6 +284,15 @@ summary { cursor: pointer; width: fit-content; }
   </div>
   <section class="secondary" aria-label="Operator help">
     <details><summary>Steering &amp; voice help</summary><div class="help-content"><p id="camera-guidance">Look straight to center. Turn your head to steer.</p><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop, “resume” to drive again, or “recenter” to calibrate.</p><p>Forward motion pauses below 20 cm or when the front sensor has no echo. Motion pauses when tracking or rover data is lost.</p><p>The camera view is mirrored. Use desktop Chrome or Edge over HTTPS. Close XRPCode before connecting the Red Board.</p></div></details>
+    <details id="transcript-panel"><summary>Voice transcript</summary><div class="transcript-log help-content">
+      <p id="transcript-status" role="status">No voice activity recorded yet. Stored only in this browser.</p>
+      <div class="phone-actions">
+        <button id="transcript-csv" type="button">Download CSV</button>
+        <button id="transcript-json" type="button">Download JSON</button>
+        <button id="transcript-clear" type="button">Clear</button>
+      </div>
+      <ol id="transcript-list" aria-label="Voice transcript, newest first"></ol>
+    </div></details>
     <details><summary>Steering diagnostics</summary><pre id="steering-diagnostics" style="white-space:pre-wrap;overflow-wrap:anywhere" aria-live="off"></pre></details>
     <details><summary>Phone camera setup</summary>
           <div class="phone-controls">
@@ -296,6 +315,7 @@ summary { cursor: pointer; width: fit-content; }
 <aside id="mascot" aria-label="Hoot rover companion"></aside>
 <script defer src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script defer src="phone-video.js?v=5"></script>
+<script src="transcript-log.js?v=1"></script>
 <script>
   // The XRP's Bluetooth REPL uses the Nordic UART service.
   const XRP_UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
@@ -1135,6 +1155,39 @@ summary { cursor: pointer; width: fit-content; }
   const speechHints = ["rover forward", "rover reverse", "rover left", "rover right",
     "go forward", "back up", "turn left", "turn right", "stop", "resume", "recenter"];
 
+  // Transcript log: result index (per recognition session) → pending entry id.
+  let heardLog = new Map(), lastHeard = null, lastReply = null;
+
+  function logHeard(index, transcript, final, command, source) {
+    const log = window.LookoutTranscript;
+    if (!log || !transcript) return;
+    const entry = {speaker: "operator", kind: "speech", text: transcript, final, command, source};
+    const known = heardLog.get(index);
+    if (known) {
+      known.then(id => log.update(id, entry));
+    } else {
+      const pending = log.add(entry).catch(() => null);
+      heardLog.set(index, pending);
+      lastHeard = {pending, at: performance.now()};
+    }
+  }
+
+  function logReply(text, accepted, action) {
+    const log = window.LookoutTranscript;
+    if (!log || !text) return;
+    const now = performance.now();
+    if (lastReply && lastReply.text === text && lastReply.heard === lastHeard && now - lastReply.at < 2000) return;
+    lastReply = {text, heard: lastHeard, at: now};
+    const parent = lastHeard && now - lastHeard.at < 4000 ? lastHeard.pending : Promise.resolve(null);
+    parent.then(replyTo => log.add({
+      speaker: "rover", kind: "feedback", replyTo,
+      text: accepted ? "Accepted: " + action : text,
+      outcome: accepted ? "accepted" : "rejected",
+      command: accepted ? action : undefined,
+      source: accepted ? text.split(" · ")[1] : undefined,
+    })).catch(() => {});
+  }
+
   function voiceFeedback(text) {
     const accepted = text.startsWith("Command: ");
     byId("voice-command").dataset.accepted = String(accepted);
@@ -1143,6 +1196,7 @@ summary { cursor: pointer; width: fit-content; }
     byId("voice-command").textContent = accepted ? action.charAt(0).toUpperCase() + action.slice(1) : text || "No command yet";
     byId("voice-command").title = text;
     byId("voice-command").closest(".command-output").querySelector("h3").textContent = accepted ? "Rover accepted" : text ? "Command not accepted" : "Rover accepted";
+    logReply(text, accepted, action);
   }
 
   function latchStop(source = "Stop button / Esc") {
@@ -1211,10 +1265,11 @@ summary { cursor: pointer; width: fit-content; }
     if (message) voiceFeedback(message);
   }
 
-  function previewVoice(index, command, source) {
+  function previewVoice(index, command, source, transcript) {
     if (voiceDraft || ignoredVoiceIndex === index || !canMove(performance.now())) return;
     const draft = {index, command, applied: false, previousYaw: yawOffset};
     voiceDraft = draft;
+    logHeard(index, transcript, false, command, source);
     draft.applied = applyVoiceCommand(command, source);
     draft.confirmTimer = setTimeout(() => {
       if (voiceDraft === draft) discardVoiceDraft("Voice was unclear · repeat the command");
@@ -1244,6 +1299,7 @@ summary { cursor: pointer; width: fit-content; }
       const phrase = spokenCommand.replace(politePrefix, "").replace(/ (?:please|now)$/, "");
       const stop = /^(?:stop|halt|brake|freeze)(?: (?:moving|the rover|rover))?$/.test(phrase);
       if (stop) {
+        logHeard(i, transcript, item.isFinal, "stop", source);
         applyVoiceCommand("stop", source);
         ignoredVoiceIndex = i;
         return;
@@ -1251,6 +1307,7 @@ summary { cursor: pointer; width: fit-content; }
       const command = localVoiceCommands.get(phrase) ??
         localVoiceCommands.get(phrase.replace(/ (?:a little|a bit)$/, ""));
       const quick = addressed && quickVoicePhrases.has(spokenCommand);
+      if (item.isFinal && transcript) logHeard(i, transcript, true, command, source);
       if (voiceDraft) {
         if (voiceDraft.index !== i || voiceDraft.command !== command || (!item.isFinal && !quick)) {
           discardVoiceDraft("Phrase changed · repeat the command");
@@ -1258,7 +1315,7 @@ summary { cursor: pointer; width: fit-content; }
       }
       if (i === ignoredVoiceIndex || !transcript) continue;
       if (!item.isFinal) {
-        if (quick) previewVoice(i, command, source);
+        if (quick) previewVoice(i, command, source, transcript);
         continue;
       }
       if (command) {
@@ -1327,6 +1384,7 @@ summary { cursor: pointer; width: fit-content; }
     active.onstart = () => {
       if (!current()) return;
       lastFinalVoiceIndex = lastInterimVoiceIndex = ignoredVoiceIndex = -1;
+      heardLog = new Map();
       networkError = false;
       voiceLabel = "Listening · " + source;
     };
@@ -1725,6 +1783,6 @@ summary { cursor: pointer; width: fit-content; }
     if (saved) showViewer(saved);
   });
 </script>
-<script src="mascot.js?v=c33a4f9f7541"></script>
+<script src="mascot.js?v=57000226d4df"></script>
 </body>
 </html>

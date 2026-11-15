@@ -448,6 +448,10 @@ class Mascot {
     if (!line) return;
     this.showBubble(line.caption || line.say, line.say ? 4200 : 1e9);
     if (line.say) this.speak(line.say, id);
+    window.LookoutTranscript?.add({
+      speaker: "hoot", kind: "line", lineId: id,
+      text: line.say || line.caption, audible: Boolean(line.say && this.sound),
+    });
   }
   toggleSound() {
     this.setSound(!this.sound);
