@@ -28,7 +28,7 @@
 
   function bookmark(value, base) {
     const url = new URL("rover-phone.html", base);
-    url.searchParams.set("v", "3");
+    url.searchParams.set("v", "4");
     url.hash = new URLSearchParams({id: value.id, key: value.token}).toString();
     return url.href;
   }
@@ -49,7 +49,7 @@
       url.searchParams.set("facing", "rear");
       url.searchParams.set("audiodevice", "0");
     } else {
-      url.searchParams.set("forceviewerlandscape", "1");
+      url.searchParams.set("forceviewerlandscape", "270");
       url.searchParams.set("clean", "1");
       url.searchParams.set("noaudio", "1");
     }
