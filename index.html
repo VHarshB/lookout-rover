@@ -188,12 +188,6 @@ summary { cursor: pointer; width: fit-content; }
 .camera-tabs button[aria-selected='true'] { border-color: #77678a; color: #f5f3fc; background: #34284e; }
 .camera-views { position: relative; }
 .camera-view[data-active='false'] { position: absolute; inset: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
-.camera-views[data-view='phone'][data-steering='true'] { display: grid; }
-.camera-views[data-view='phone'][data-steering='true'] #laptop-panel {
-  position: static; visibility: visible; grid-row: 2; justify-self: end;
-  width: min(32%, 220px); margin-top: 12px;
-}
-.camera-views[data-view='phone'] #laptop-panel .camera-note { display: none; }
 .camera-view [hidden], .camera-heading [hidden] { display: none !important; }
 .camera-note button { margin-top: 1rem; min-height: 44px; padding: .5rem .85rem; }
 #phone-badge { color: var(--muted); font-size: clamp(14px, 1.45vw, 20px); }
@@ -227,7 +221,7 @@ summary { cursor: pointer; width: fit-content; }
         </div>
         <span id="tracking-status">Camera off</span><span id="phone-badge" hidden>Phone offline</span>
       </div>
-      <div class="camera-views" id="camera-views" data-view="laptop">
+      <div class="camera-views">
         <div class="camera-view" id="laptop-panel" role="tabpanel" aria-labelledby="laptop-tab" data-active="true">
           <div class="camera">
             <div id="camera-note" class="camera-note"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="12" width="26" height="24" rx="5"/><path d="m32 20 10-6v20l-10-6"/></svg><strong id="camera-empty-title">Camera off</strong><p id="camera-instruction">Start the laptop camera to preview it here.</p><button id="laptop-preview" type="button">Start laptop camera</button></div>
@@ -613,6 +607,7 @@ summary { cursor: pointer; width: fit-content; }
   const TRACK_MS = 16;
   const MEDIAPIPE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21";
   const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   let enabled = false, connecting = false;
   let generation = 0;
@@ -620,11 +615,7 @@ summary { cursor: pointer; width: fit-content; }
   let stream, tracker, recognition, restartSpeech;
   let cameraRequest = null, cameraEpoch = 0;
   let trackingError = "", voiceLabel = "Mic off";
-  let speechPackState, voicePackInstalling = false;
-  const speechPackCheck = Speech && typeof Speech.available === "function" && "processLocally" in Speech.prototype
-    ? Promise.resolve().then(() => Speech.available(LOCAL_SPEECH_PACK)).then(state => speechPackState = state, () => undefined)
-    : null;
-  let trackingFrame = null;
+  let voicePackInstalling = false;
   let face, previousFrame = -1, lastSample = 0, calibration = [], neutral = null;
   let filteredYaw = 0, faceAngle = 0, faceRate = 0, lastControlPose = 0, yawOffset = 0;
   let latestStatus = null, lastPoll = 0, lastMotionAt = 0, lastMotion = "";
@@ -882,8 +873,8 @@ summary { cursor: pointer; width: fit-content; }
     };
   }
 
-  async function makeTracker(useWorker) {
-    if (useWorker && window.Worker && window.OffscreenCanvas && window.createImageBitmap) {
+  async function makeTracker() {
+    if (window.Worker && window.OffscreenCanvas && window.createImageBitmap) {
       const blob = new Blob([
         poseOf.toString(), "\n", loadModel.toString(), "\n(", trackingWorker.toString(), ")();"
       ], {type: "text/javascript"});
@@ -906,7 +897,6 @@ summary { cursor: pointer; width: fit-content; }
         });
         await ask({kind: "start", bundle: MEDIAPIPE, asset: MODEL}, [], 12000);
         return {
-          worker: true,
           close: () => worker.terminate(),
           async predict(at) {
             const frame = await createImageBitmap(video);
@@ -975,24 +965,6 @@ summary { cursor: pointer; width: fit-content; }
     lastControlPose = at;
   }
 
-  function scheduleTracking(token) {
-    // Read one fresh camera frame at a time, independent of the displayed feed.
-    const onFrame = () => {
-      trackingFrame = null;
-      void track(token);
-    };
-    trackingFrame = video.requestVideoFrameCallback
-      ? video.requestVideoFrameCallback(onFrame)
-      : requestAnimationFrame(onFrame);
-  }
-
-  function cancelTrackingFrame() {
-    if (trackingFrame === null) return;
-    if (video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(trackingFrame);
-    else cancelAnimationFrame(trackingFrame);
-    trackingFrame = null;
-  }
-
   async function track(token) {
     if (!enabled || generation !== token || !stream) return;
     const at = performance.now();
@@ -1001,27 +973,27 @@ summary { cursor: pointer; width: fit-content; }
       lastSample = at;
       try {
         const pose = await tracker.predict(at);
-        if (enabled && generation === token && stream && !hidden) {
+        if (enabled && generation === token) {
           acceptPose(pose, at);
           step();
         }
       } catch (_) {
-        if (generation !== token || !stream) return;
-        const retryOnMain = tracker.worker;
-        trackingError = retryOnMain ? "Face tracking restarting" : "Face tracking failed · toggle steering to retry";
+        if (generation !== token) return;
+        trackingError = "Face tracking restarting";
         face = null;
         stopMotion();
         if (tracker) tracker.close();
         tracker = null;
-        if (retryOnMain) await prepareTracker(token, false);
+        await delay(300);
+        if (enabled && generation === token) await prepareTracker(token);
       }
     }
-    if (enabled && generation === token && stream && tracker) scheduleTracking(token);
+    if (enabled && generation === token) requestAnimationFrame(() => void track(token));
   }
 
-  async function prepareTracker(token, useWorker = true) {
+  async function prepareTracker(token) {
     try {
-      const result = await makeTracker(useWorker);
+      const result = await makeTracker();
       if (generation === token && enabled) {
         tracker = result;
         trackingError = "";
@@ -1115,10 +1087,10 @@ summary { cursor: pointer; width: fit-content; }
     return draft;
   }
 
-  function discardVoiceDraft(message, ignoreResult = true) {
+  function discardVoiceDraft(message) {
     const draft = takeVoiceDraft();
     if (!draft?.applied) return;
-    if (ignoreResult) ignoredVoiceIndex = draft.index;
+    ignoredVoiceIndex = draft.index;
     yawOffset = draft.previousYaw;
     stopMotion();
     if (message) voiceFeedback(message);
@@ -1166,7 +1138,7 @@ summary { cursor: pointer; width: fit-content; }
       const quick = addressed && quickVoicePhrases.has(spokenCommand);
       if (voiceDraft) {
         if (voiceDraft.index !== i || voiceDraft.command !== command || (!item.isFinal && !quick)) {
-          discardVoiceDraft("Phrase changed · repeat the command", false);
+          discardVoiceDraft("Phrase changed · repeat the command");
         } else if (item.isFinal && takeVoiceDraft().applied) continue;
       }
       if (i === ignoredVoiceIndex || !transcript) continue;
@@ -1230,10 +1202,7 @@ summary { cursor: pointer; width: fit-content; }
       if (!current()) return;
       try { active.start(); }
       catch (_) {
-        if (local) {
-          speechPackState = undefined;
-          switchRecognition(token, false);
-        }
+        if (local) switchRecognition(token, false);
         else voiceLabel = "Mic unavailable · toggle steering to retry";
       }
     };
@@ -1260,7 +1229,6 @@ summary { cursor: pointer; width: fit-content; }
       }
       if (local && ["language-not-supported", "service-not-allowed", "network", "bad-grammar",
                     "phrases-not-supported"].includes(event.error)) {
-        speechPackState = undefined;
         switchRecognition(token, false);
         return;
       }
@@ -1278,11 +1246,7 @@ summary { cursor: pointer; width: fit-content; }
       if (!current()) return;
       discardVoiceDraft();
       if (!networkError) voiceLabel = "Mic reconnecting";
-      restartSpeech = setTimeout(() => {
-        if (!current()) return;
-        if (!local && speechPackState === "available") openRecognition(token, true, true);
-        else start();
-      }, networkError ? 1400 : 100);
+      restartSpeech = setTimeout(start, networkError ? 1400 : 100);
     };
     voiceLabel = "Starting mic";
     start();
@@ -1293,28 +1257,26 @@ summary { cursor: pointer; width: fit-content; }
       voiceLabel = "Voice unavailable in this browser";
       return;
     }
-    const local = speechPackState === "available";
-    openRecognition(token, local, local);
-    if (local || !speechPackCheck) return;
-    const available = await speechPackCheck;
-    if (!voiceEnabled(token)) return;
-    if (available === "available" && voiceLabel !== "Listening · Chrome speech") {
-      switchRecognition(token, true);
+    if (typeof Speech.available !== "function" || !("processLocally" in Speech.prototype)) {
+      openRecognition(token, false, false);
       return;
     }
+    voiceLabel = "Checking on-device voice";
+    let available;
+    try { available = await Speech.available(LOCAL_SPEECH_PACK); } catch (_) {}
+    if (!voiceEnabled(token)) return;
+    switchRecognition(token, available === "available");
     if (!["downloadable", "downloading"].includes(available) || typeof Speech.install !== "function") return;
     voicePackInstalling = true;
     let installed = false;
     try { installed = await Speech.install(LOCAL_SPEECH_PACK); } catch (_) {}
-    if (installed) speechPackState = "available";
     if (!voiceEnabled(token)) return;
     voicePackInstalling = false;
-    if (installed && voiceLabel !== "Listening · Chrome speech") switchRecognition(token, true);
+    if (installed) switchRecognition(token, true);
   }
 
   function disable() {
     enabled = false;
-    updateCameraView();
     generation++;
     discardVoiceDraft();
     lastFinalVoiceIndex = lastInterimVoiceIndex = ignoredVoiceIndex = -1;
@@ -1334,7 +1296,6 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function releaseLaptopCamera() {
-    cancelTrackingFrame();
     cameraEpoch++;
     cameraRequest = null;
     const camera = stream;
@@ -1400,7 +1361,6 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function showCamera(name) {
-    byId("camera-views").dataset.view = name;
     for (const view of ["laptop", "phone"]) {
       const active = view === name;
       const tab = byId(view + "-tab");
@@ -1411,20 +1371,13 @@ summary { cursor: pointer; width: fit-content; }
       panel.setAttribute("aria-hidden", String(!active));
       panel.inert = !active;
     }
+    byId("tracking-status").hidden = name !== "laptop";
     byId("phone-badge").hidden = name !== "phone";
-    updateCameraView();
-  }
-
-  function updateCameraView() {
-    const views = byId("camera-views");
-    views.dataset.steering = String(enabled);
-    byId("tracking-status").hidden = views.dataset.view === "phone" && !enabled;
   }
 
   async function enable() {
     if (!socket.ready || enabled) return;
     enabled = true;
-    updateCameraView();
     const token = ++generation;
     face = null;
     voiceStop = false;
@@ -1436,7 +1389,7 @@ summary { cursor: pointer; width: fit-content; }
       const camera = await openLaptopCamera();
       if (!camera || !enabled || generation !== token) return;
       await prepareTracker(token);
-      if (enabled && generation === token && stream && tracker) scheduleTracking(token);
+      if (enabled && generation === token) requestAnimationFrame(() => void track(token));
     } catch (_) {
       if (generation !== token) return;
       trackingError = "Camera permission denied or unavailable";
