@@ -273,6 +273,7 @@ summary { cursor: pointer; width: fit-content; }
   </div>
   <section class="secondary" aria-label="Operator help">
     <details><summary>Steering &amp; voice help</summary><div class="help-content"><p id="camera-guidance">Look straight to center. Turn your head to steer.</p><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop, “resume” to drive again, or “recenter” to calibrate.</p><p>Forward motion pauses below 20 cm or when the front sensor has no echo. Motion pauses when tracking or rover data is lost.</p><p>The camera view is mirrored. Use desktop Chrome or Edge over HTTPS. Close XRPCode before connecting the Red Board.</p></div></details>
+    <details><summary>Steering diagnostics</summary><pre id="steering-diagnostics" style="white-space:pre-wrap;overflow-wrap:anywhere" aria-live="off"></pre></details>
     <details><summary>Phone camera setup</summary>
           <div class="phone-controls">
             <p id="phone-status" role="status">Create a phone link or reopen your bookmarked link.</p>
@@ -299,6 +300,7 @@ summary { cursor: pointer; width: fit-content; }
   const XRP_UART = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
   const XRP_UART_WRITE = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
   const XRP_UART_READ = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+  const steeringTrace = {frame: "No frames yet", pose: "Not sampled", write: "None", reply: "None", aim: "None"};
   const CONTROLLER_START = "exec(open('/lookout_face_control.py').read())\r";
 
   class RedBoardConnection {
@@ -431,6 +433,7 @@ summary { cursor: pointer; width: fit-content; }
     async write(session, text) {
       if (session.closing || !(session.writer || session.transmit)) throw new Error(session.label + " disconnected");
       const bytes = new TextEncoder().encode(text);
+      const writeAt = performance.now();
       session.pending++;
       this.pending = session.pending;
       let completed = false;
@@ -443,6 +446,8 @@ summary { cursor: pointer; width: fit-content; }
         } else {
           await session.writer.write(bytes);
         }
+        steeringTrace.write = text.trim() + " ? completed in " + Math.round(performance.now() - writeAt) + " ms";
+        if (text.startsWith("AIM ")) steeringTrace.aim = steeringTrace.write;
         completed = true;
       } finally {
         session.pending--;
@@ -506,6 +511,8 @@ summary { cursor: pointer; width: fit-content; }
 
     process(session, line) {
       session.lastLine = line;
+      steeringTrace.reply = line;
+
       if (line === "READY_FACE_V2") this.version = 2;
       const expected = session.waiter?.expected;
       if (typeof expected === "function" ? expected(line) : expected === line) {
@@ -548,7 +555,8 @@ summary { cursor: pointer; width: fit-content; }
         command = commands[message.kind];
       }
       if (command) {
-        void this.write(session, command).catch(() => {
+        void this.write(session, command).catch(error => {
+          steeringTrace.write = command.trim() + " ? failed: " + error.message;
           void this.close(session, session.label + " connection was lost.");
         });
       }
@@ -688,6 +696,15 @@ summary { cursor: pointer; width: fit-content; }
     byId("voice-state").title = voiceLabel;
 
     const now = performance.now();
+    byId("steering-diagnostics").textContent = [
+      "Laptop frame: " + steeringTrace.frame,
+      "Pose: " + steeringTrace.pose,
+      "Calibration: " + calibration.length + "/7 ? neutral " + (neutral === null ? "unset" : neutral.toFixed(1)),
+      "Arming: " + (started ? "ZEROED received" : "waiting") + " ? attempts " + zeroAttempts,
+      "Telemetry age: " + (latestStatus ? Math.round(now - latestStatus.at) + " ms ? " + latestStatus.reason : "none"),
+      "Last AIM write: " + steeringTrace.aim,
+      "Last completed write: " + steeringTrace.write, "Last reply: " + steeringTrace.reply,
+    ].join("\n");
     const report = latestStatus && now - latestStatus.at < 650 ? latestStatus : null;
     const hasFace = liveFace(now);
     byId("target").textContent = enabled && neutral !== null && hasFace ? degrees(target()) : "—";
@@ -823,22 +840,22 @@ summary { cursor: pointer; width: fit-content; }
   function poseOf(result) {
     const matrix = result.facialTransformationMatrixes?.[0]?.data;
     const points = result.faceLandmarks?.[0];
-    if (!matrix || matrix.length !== 16 || !points) return null;
+    if (!matrix || matrix.length !== 16 || !points) return {rejected: "No face or rotation matrix"};
 
     const columnTail = Math.abs(matrix[3]) + Math.abs(matrix[7]) + Math.abs(matrix[11]);
     const rowTail = Math.abs(matrix[12]) + Math.abs(matrix[13]) + Math.abs(matrix[14]);
     const forwardX = columnTail < rowTail ? matrix[8] : matrix[2];
     const forwardZ = matrix[10];
-    if (!Number.isFinite(forwardX) || !Number.isFinite(forwardZ) || forwardZ < 0.15) return null;
+    if (!Number.isFinite(forwardX) || !Number.isFinite(forwardZ) || forwardZ < 0.15) return {rejected: "Face rotation outside usable range"};
 
     const left = points[234], right = points[454], top = points[10], bottom = points[152];
-    if (!left || !right || !top || !bottom) return null;
+    if (!left || !right || !top || !bottom) return {rejected: "Missing face landmarks"};
     const x0 = Math.min(left.x, right.x);
     const x1 = Math.max(left.x, right.x);
     const y0 = Math.min(top.y, bottom.y);
     const y1 = Math.max(top.y, bottom.y);
     if (x1 - x0 < 0.085 || y1 - y0 < 0.13 ||
-        x0 < 0.015 || x1 > 0.985 || y0 < 0.015 || y1 > 0.985) return null;
+        x0 < 0.015 || x1 > 0.985 || y0 < 0.015 || y1 > 0.985) return {rejected: "Face too small or clipped by frame"};
     return { yaw: Math.atan2(forwardX, forwardZ) * 180 / Math.PI, box: [x0, y0, x1, y1] };
   }
 
@@ -904,6 +921,7 @@ summary { cursor: pointer; width: fit-content; }
         });
         await ask({kind: "start", bundle: MEDIAPIPE, asset: MODEL}, [], 12000);
         return {
+          workerBackend: true,
           canFallBack: true,
           close: () => worker.terminate(),
           async predict(at) {
@@ -947,7 +965,9 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function acceptPose(pose, at) {
-    if (!pose || performance.now() - at >= FACE_TIMEOUT) {
+    const age = performance.now() - at;
+    steeringTrace.pose = !pose ? "No face" : pose.rejected || (age >= FACE_TIMEOUT ? "Rejected: stale pose " + Math.round(age) + " ms" : "Yaw " + pose.yaw.toFixed(1) + "? ? age " + Math.round(age) + " ms");
+    if (!pose || pose.rejected || age >= FACE_TIMEOUT) {
       if (!liveFace(performance.now())) draw(null);
       return;
     }
@@ -1000,6 +1020,7 @@ summary { cursor: pointer; width: fit-content; }
     const currentTracker = tracker;
     const at = performance.now();
     const mediaTime = video.currentTime;
+    steeringTrace.frame = video.videoWidth + "?" + video.videoHeight + " ? time " + mediaTime.toFixed(3) + " ? ready " + video.readyState + (video.paused ? " ? paused" : "");
     if (video.readyState >= 2 && !video.paused && mediaTime !== previousFrame && at - lastSample >= TRACK_MS) {
       previousFrame = mediaTime;
       lastSample = at;
@@ -1008,6 +1029,16 @@ summary { cursor: pointer; width: fit-content; }
         const pose = await currentTracker.predict(at);
         if (enabled && generation === token && stream === camera && !hidden) {
           acceptPose(pose, at);
+          if (currentTracker.workerBackend && performance.now() - at >= FACE_TIMEOUT) {
+            // A successful but late worker result cannot arm or steer safely.
+            // Try the main-thread GPU backend once; keep the freshness cutoff.
+            face = null;
+            stopMotion();
+            currentTracker.close();
+            tracker = null;
+            trackingError = "Worker too slow ? switching tracker";
+            await prepareTracker(token, false, true);
+          }
           step();
         }
       } catch (_) {
