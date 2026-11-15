@@ -1,8 +1,10 @@
-﻿# Lookout Rover
+# Lookout Rover
 
 **Lookout Rover is a browser-controlled XRP robot that combines hands-free head steering, voice commands, and a live vehicle-mounted phone camera.**
 
-The next capability is **voice-directed visual navigation**: identify a person or object in the rover's live camera view, select it, and have the rover approach it while monitoring obstacles and preserving operator Stop control. This is the planned extension; OpenCV detection and autonomous navigation are not implemented in the current release.
+The optional local companion adds **voice-directed visual approach**: detect people and supported objects in the rover camera, resolve natural-language requests through AWS Bedrock, and supervise a selected-target approach through a clear area. Code and mocked control tests are implemented; live AWS access and physical motion validation still require setup. General route planning is not implemented.
+
+**Start here:** [Windows launch, AWS authentication, phone pairing and first-use guide](docs/ASSISTED_SETUP.md). The public Pages console remains the manual app; Assisted mode is only available when running the local Python service.
 
 [Open the operator console](https://vharshb.github.io/lookout-rover/) · [Detailed architecture and diagrams](docs/ARCHITECTURE.md) · [Testing and physical bench checks](qa/README.md)
 
@@ -15,9 +17,9 @@ The next capability is **voice-directed visual navigation**: identify a person o
 | Speak forward, reverse, left, right, stop, resume and recenter commands | Implemented |
 | View landscape video from a phone mounted on the rover | Implemented; VDO.Ninja / WebRTC |
 | Stop/Esc, tracking and telemetry freshness checks, obstacle and motor-fault handling | Implemented; physical validation remains necessary |
-| Detect and track people/objects in the vehicle video with OpenCV | Planned |
-| Say "Go to that person" or "Go to that object" and select a visible target | Planned |
-| Approach a selected target and stop at a measured stand-off distance | Planned; requires range estimation and motion integration |
+| Detect and track supported people/objects with OpenCV | Implemented in optional local Python companion |
+| Natural-language requests and visible target selection | Implemented Bedrock adapter; requires configured AWS access |
+| Supervised approach to a stationary selected target | Implemented with explicit sensor/target range validation; physical verification pending |
 | Find a route around obstacles to a target | Later phase; needs localization and adequate obstacle sensing |
 
 ## What connects to what
@@ -80,12 +82,12 @@ The board controller is required on the XRP but is **not currently tracked in th
 
 ## OpenCV + "go to that person" — planned addition
 
-The proposed first version processes the phone video **on the laptop**, while the phone remains the camera source. OpenCV supplies image-processing/tracking tools; a trained detection model supplies person/object recognition. The navigation controller is a separate component.
+The local companion processes the phone video **on the laptop**, while the phone remains the camera source. OpenCV supplies image-processing/tracking tools; a trained detection model supplies person/object recognition. The navigation controller is a separate component.
 
 ~~~mermaid
 flowchart LR
     Video["Live vehicle phone video"] --> Frames["Frame bridge<br/>timestamps + orientation"]
-    Frames --> Vision["OpenCV + detection model<br/>detect and track targets"]
+    Frames --> Vision["Local Python OpenCV + model<br/>detect and track targets"]
     Voice["Voice: Go to that person"] --> Resolve["Resolve target<br/>highlight / select / confirm"]
     Vision --> Resolve
     Resolve --> Goal["Locked target ID"]
@@ -100,9 +102,9 @@ flowchart LR
     XRP --> Feedback
 ~~~
 
-**Example experience:** the camera shows several people. The operator says "Go to that person," selects the intended person from the highlighted detections, and confirms. The rover aligns, approaches slowly using continuous fresh observations and a validated distance estimate, then stops at its configured stand-off distance. It stops if the target disappears, the route becomes unsafe, video/telemetry becomes stale, or the operator presses Stop.
+**Example:** select a highlighted stationary person, say "Rover approach that person," review the interpreted goal and confirm. The controller aligns, then waits for explicit validation that the front sensor measures the selected target at the operator's measured distance. It approaches only inside that validated corridor and stops at 60 cm, on uncertainty, or after eight seconds. Physical sensor alignment and motor behavior must be bench-tested first.
 
-The first milestone is detection and target selection **without movement**. Then comes a supervised approach in a clear area. Finding a route around arbitrary obstacles comes after reliable range, localization and obstacle coverage are available. A detection box and the existing single front sensor are not enough for general autonomous navigation.
+Use detection and target selection **without movement** first, then complete the supervised approach bench procedure in a clear area. Finding a route around arbitrary obstacles comes after reliable range, localization and obstacle coverage are available. A detection box and the existing single front sensor are not enough for general autonomous navigation.
 
 The [architecture document](docs/ARCHITECTURE.md) explains the frame bridge, control ownership, missing components, navigation states and implementation order.
 
@@ -123,4 +125,4 @@ For local preview, serve the repository with a static web server, for example py
 
 Browser regression checks include mocked transport and real-model tests with a portrait fixture. They do not establish reliable physical motor response. Intermittent power/stall reports and loaded wheel behavior must be resolved and bench-tested before enabling autonomous movement. See [QA notes](qa/README.md).
 
-Documentation reviewed against main at bb89619. This documentation does not enable autonomous commands or change the running app.
+Manual architecture baseline: bb89619. The optional companion is isolated on feature/assisted-vision-navigation, off by default. Firmware is unchanged; live AWS and physical rover acceptance are pending.

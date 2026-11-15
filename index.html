@@ -212,6 +212,7 @@ summary { cursor: pointer; width: fit-content; }
 }
 </style>
 <link rel="stylesheet" href="theme.css?v=hoot-theme">
+<link rel="stylesheet" href="assisted/assist.css?v=1">
 </head>
 <body>
 <main>
@@ -720,7 +721,8 @@ summary { cursor: pointer; width: fit-content; }
     ].join("\n");
     const report = latestStatus && now - latestStatus.at < 650 ? latestStatus : null;
     const hasFace = liveFace(now);
-    byId("target").textContent = enabled && neutral !== null && hasFace ? degrees(target()) : "—";
+    const shownTarget = window.LookoutAssist?.active ? window.LookoutAssist.command(now)?.angle : target();
+    byId("target").textContent = enabled && neutral !== null && hasFace && Number.isFinite(shownTarget) ? degrees(shownTarget) : "—";
     renderMetric("heading", report ? degrees(report.heading) : "—");
     renderMetric("distance", report ? (report.distance === null ? "No echo" : Number(report.distance.toFixed(1)) + " cm") : "—");
 
@@ -744,6 +746,7 @@ summary { cursor: pointer; width: fit-content; }
     else if (report.reason === "COMMAND_LOST") reason = "No steering updates";
     else if (translation?.base > 0 && report.distance === null) reason = "Front sensor has no echo";
     else if (translation?.base > 0 && report.distance < 20) reason = "Obstacle ahead";
+    else if (window.LookoutAssist?.active) reason = window.LookoutAssist.motionLabel();
     else if (translation) reason = translation.base > 0 ? "Driving forward" : "Reversing";
     else if (Math.abs(angleDelta(target() - report.heading)) <= 2.5) reason = "Aligned";
     else reason = "Turning";
@@ -770,6 +773,7 @@ summary { cursor: pointer; width: fit-content; }
       "Motor power off": "Switch on the rover’s motor power.",
       "No steering updates": "Motion paused. Waiting for control updates.",
       "Aligned": "Turn your head to steer. Speak to move.",
+      "Assisted waiting": "Review or confirm a command in Assisted vision & voice.",
       "Turning": "Following your steering target.",
       "Driving forward": "Head gestures adjust your direction.",
       "Reversing": "Moving backward. Check the path behind the rover.",
@@ -859,9 +863,22 @@ summary { cursor: pointer; width: fit-content; }
       return;
     }
 
-    const base = translation?.base ?? 0;
-    const angle = Math.round(target() * 10) / 10;
-    const rate = steeringRate(now, angle, latestStatus.heading);
+    // Optional authority hook. Undefined preserves the original manual path.
+    const assisted = window.LookoutAssist?.command(now);
+    if (assisted === null) {
+      stopMotion("Assisted mode waiting or stopped");
+      render();
+      return;
+    }
+    const base = assisted ? assisted.base : translation?.base ?? 0;
+    const angle = assisted ? assisted.angle : Math.round(target() * 10) / 10;
+    const rate = assisted ? 0 : steeringRate(now, angle, latestStatus.heading);
+    if (base > 0 && (latestStatus.distance === null || latestStatus.distance < 20)) {
+      stopMotion("Front range blocked assisted movement");
+      window.LookoutAssist?.cancel("Front range blocked");
+      render();
+      return;
+    }
     const packet = angle.toFixed(1) + " " + base.toFixed(2) + " " + rate;
     if (socket.bufferedAmount === 0 && (
       voiceUpdate || now - lastMotionAt >= aimHeartbeat || (packet !== lastMotion && now - lastMotionAt >= minAimInterval)
@@ -1146,6 +1163,7 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function latchStop(source = "Stop button / Esc") {
+    window.dispatchEvent(new CustomEvent("lookout-stop", {detail: String(source)}));
     discardVoiceDraft();
     if (lastInterimVoiceIndex > lastFinalVoiceIndex) ignoredVoiceIndex = lastInterimVoiceIndex;
     voiceStop = true;
@@ -1160,6 +1178,7 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function applyVoiceCommand(command, source) {
+    if (command !== "stop") window.LookoutAssist?.release("Manual command");
     if (!enabled || hidden || !socket.ready) return false;
     if (command === "stop") {
       latchStop("Voice stop - " + source);
@@ -1247,6 +1266,18 @@ summary { cursor: pointer; width: fit-content; }
         applyVoiceCommand("stop", source);
         ignoredVoiceIndex = i;
         return;
+      }
+      if (window.LookoutAssist?.active && item.isFinal && ["resume", "recenter"].includes(phrase)) {
+        applyVoiceCommand(phrase, source);
+        continue;
+      }
+      if (window.LookoutAssist?.active) {
+        // Emergency stop above stays local, including interim Stop.
+        if (item.isFinal && i !== ignoredVoiceIndex && transcript) {
+          window.LookoutAssist.hear(transcript);
+          ignoredVoiceIndex = i;
+        }
+        continue;
       }
       const command = localVoiceCommands.get(phrase) ??
         localVoiceCommands.get(phrase.replace(/ (?:a little|a bit)$/, ""));
@@ -1391,6 +1422,7 @@ summary { cursor: pointer; width: fit-content; }
   }
 
   function disable() {
+    window.LookoutAssist?.release("Steering disabled");
     enabled = false;
     updateCameraView();
     generation++;
@@ -1616,6 +1648,22 @@ summary { cursor: pointer; width: fit-content; }
     releaseLaptopCamera();
     render();
   });
+  // Read-only state and guarded actions for the optional local companion.
+  window.LookoutRover = Object.freeze({
+    snapshot() {
+      const now = performance.now();
+      return {ready: socket.ready, armed: started, enabled, face_fresh: Boolean(liveFace(now)),
+        stopped: voiceStop, fault: motorFault, hidden, version: socket.version,
+        heading: latestStatus?.heading ?? 0, distance: latestStatus?.distance ?? null,
+        reason: latestStatus?.reason ?? "NO_DATA",
+        age_ms: latestStatus ? now - latestStatus.at : 1e9};
+    },
+    quiet(reason) { discardVoiceDraft(); stopMotion(reason); },
+    stop(reason) { latchStop(reason); },
+    accepted(action) {
+      if (["forward","reverse","left","right","approach"].includes(action)) voiceFeedback("Command: " + action + " \u00b7 Assisted");
+    }
+  });
   render();
   setInterval(() => step(), 32);
 
@@ -1668,7 +1716,7 @@ summary { cursor: pointer; width: fit-content; }
       currentPairing = value;
       clearInterval(statsTimer);
       clearTimeout(waitingTimer);
-      const link = api.bookmark(value, location.href);
+      const link = api.bookmark(value, window.LookoutService?.phoneBase || location.href);
       const view = api.relayUrl(value, false);
       byId("phone-url").value = link;
       byId("phone-qr").replaceChildren();
@@ -1726,5 +1774,6 @@ summary { cursor: pointer; width: fit-content; }
   });
 </script>
 <script src="mascot.js?v=c33a4f9f7541"></script>
+<script defer src="assisted/assist.js?v=1"></script>
 </body>
 </html>

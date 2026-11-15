@@ -1,0 +1,10 @@
+﻿.local-deps/
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+models/
+companion/local-config.json
+*.pyc

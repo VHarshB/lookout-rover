@@ -119,3 +119,23 @@ documents a latched Stop, not proof of low motor power.
 No motor gains, distance thresholds, Stop routing or controller firmware were
 changed in this correction. Physical smoothness and the source of intermittent
 POWER_OFF still require live diagnostics.
+
+
+## Optional local companion branch
+
+See docs/ASSISTED_SETUP.md for setup, control limits and physical acceptance.
+Run python -m unittest discover -s tests -v for local navigation, language
+validation, HTTP protection, ownership and cancelled-cloud-reply tests.
+Run python qa/assisted_browser_check.py for actual VDO.Ninja snapshot extraction
+and real OpenCV detection from a simulated phone sender. AWS and the XRP are
+mocked. The range/arrival UI uses a controlled centered perception fixture.
+Existing manual regression remains python qa/steering_check.py.
+
+Observed OpenCV 4.14 person detection on the official basketball sample:
+two people detected at 0.995 and 0.864 confidence; 60 ms warm inference in one
+measurement. This is a fixture benchmark, not deployed camera accuracy.
+
+Desktop and mobile screenshots are generated outside Git under the temporary
+lookout-assisted-qa directory. Do not publish generated private pairing URLs or
+AWS credentials. No physical rover or live AWS inference was used in these
+tests. Intermittent motor power/stall behavior still needs physical resolution.
