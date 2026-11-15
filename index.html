@@ -236,19 +236,7 @@ summary { cursor: pointer; width: fit-content; }
             <iframe id="rover-video" title="Rover phone camera relay" allow="autoplay" referrerpolicy="no-referrer" hidden></iframe>
             <div id="phone-camera-note" class="camera-note"><strong>Phone camera</strong><p>Start the rear camera on your phone to see its view here.</p></div>
           </div>
-          <div class="phone-controls">
-            <p id="phone-status" role="status">Create a phone link or reopen your bookmarked link.</p>
-            <div class="phone-actions">
-              <button id="phone-pair" type="button">Create phone link</button>
-              <button id="phone-reload" type="button" hidden>Reload viewer</button>
-            </div>
-            <div id="phone-pair-link" hidden>
-              <div id="phone-qr" class="phone-qr" aria-label="Scan with the phone camera app" hidden></div>
-              <input id="phone-url" class="phone-link" type="text" readonly aria-label="Private reusable phone link">
-              <div class="phone-actions"><button id="phone-copy" type="button">Copy phone link</button></div>
-            </div>
-            <a id="phone-open-view" href="#" target="_blank" rel="noopener noreferrer" hidden>Open viewer in a separate tab</a>
-          </div>
+
         </div>
       </div>
     </section>
@@ -279,6 +267,21 @@ summary { cursor: pointer; width: fit-content; }
   </div>
   <section class="secondary" aria-label="Operator help">
     <details><summary>Steering &amp; voice help</summary><div class="help-content"><p id="camera-guidance">Look straight to center. Turn your head to steer.</p><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop, “resume” to drive again, or “recenter” to calibrate.</p><p>Forward motion pauses below 20 cm or when the front sensor has no echo. Motion pauses when tracking or rover data is lost.</p><p>The camera view is mirrored. Use desktop Chrome or Edge over HTTPS. Close XRPCode before connecting the Red Board.</p></div></details>
+    <details><summary>Phone camera setup</summary>
+          <div class="phone-controls">
+            <p id="phone-status" role="status">Create a phone link or reopen your bookmarked link.</p>
+            <div class="phone-actions">
+              <button id="phone-pair" type="button">Create phone link</button>
+              <button id="phone-reload" type="button" hidden>Reload viewer</button>
+            </div>
+            <div id="phone-pair-link" hidden>
+              <div id="phone-qr" class="phone-qr" aria-label="Scan with the phone camera app" hidden></div>
+              <input id="phone-url" class="phone-link" type="text" readonly aria-label="Private reusable phone link">
+              <div class="phone-actions"><button id="phone-copy" type="button">Copy phone link</button></div>
+            </div>
+            <a id="phone-open-view" href="#" target="_blank" rel="noopener noreferrer" hidden>Open viewer in a separate tab</a>
+          </div>
+    </details>
   </section>
 </main>
 <aside id="mascot" aria-label="Hoot rover companion"></aside>
