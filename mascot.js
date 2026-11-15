@@ -16,7 +16,7 @@
 const CONFIG = {
   name: "Hoot",
   maxAngle: 55,        // matches MAX_YAW / MAX_TARGET
-  sound: true,         // voice + chirps on by default (press M to toggle)
+  sound: false,        // start muted; press M or the voice button to enable
   audioBase: null,     // e.g. "voice" → plays voice/<lineId>.mp3 made with Amazon Polly
   fps: 30,             // capped so face tracking keeps the CPU
   dozeAfter: 30000,    // ms of no driving before Hoot dozes off
@@ -302,7 +302,7 @@ class Mascot {
     host.innerHTML = `
       <div class="lk-card" data-fx="">
         <div class="lk-say"><div class="lk-bubble" aria-live="polite"></div></div>
-        <div class="lk-stage">${SVG}</div>
+        <div class="lk-stage" tabindex="0" role="button" aria-label="Interact with Hoot">${SVG}</div>
         <div class="lk-bar">
           <span class="lk-name">${this.opts.name}</span><span class="lk-mood">On watch</span><span class="lk-grow"></span>
           <button type="button" class="lk-snd" title="Toggle ${this.opts.name}'s voice (M)">🔊</button>
@@ -344,6 +344,12 @@ class Mascot {
     this.channel = "BroadcastChannel" in window ? new BroadcastChannel("lookout-mascot") : null;
     this.el.snd.addEventListener("click", () => this.setSound(!this.sound));
     this.root.querySelector(".lk-stage").addEventListener("pointerdown", () => this.poke());
+    this.root.querySelector(".lk-stage").addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        this.poke();
+      }
+    });
     this.setSound(this.sound);
     this.setMood("sleep", true);
     this._frame = this._frame.bind(this);
@@ -440,6 +446,9 @@ class Mascot {
   setSound(on) {
     this.sound = on;
     this.el.snd.textContent = on ? "🔊 voice" : "🔇 muted";
+    this.el.snd.setAttribute("aria-pressed", String(on));
+    this.el.snd.setAttribute("aria-label", on ? "Mute Hoot voice" : "Enable Hoot voice");
+    this.el.snd.title = (on ? "Mute" : "Enable") + " Hoot voice (M)";
     if (!on && "speechSynthesis" in window) speechSynthesis.cancel();
   }
 

@@ -87,7 +87,20 @@ dd .unit { font: inherit; letter-spacing: inherit; }
 summary { cursor: pointer; width: fit-content; }
 .help-content { padding-top: 16px; }
 .help-content p+p { margin-top: 12px; }
-#mascot { width: 320px; max-width: 100%; margin-left: auto; }
+/* Floating companion: the owl stays unchanged; only its dock is compact. */
+#mascot { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); width: 128px; z-index: 10; }
+#mascot .lk-card { background: transparent; border: 0; border-radius: 0; padding: 0; margin: 0; overflow: visible; box-shadow: none; }
+#mascot .lk-stage { width: 100%; margin: 0; }
+#mascot .lk-name, #mascot .lk-mood, #mascot .lk-grow, #mascot .lk-read { display: none; }
+#mascot .lk-bar { position: absolute; right: 0; bottom: 0; margin: 0; }
+#mascot .lk-snd { width: 38px; height: 38px; min-height: 38px !important; padding: 0 !important; font-size: 0 !important; border-radius: 50% !important; }
+#mascot .lk-snd::after { content: '🔇'; font-size: 16px; }
+#mascot .lk-snd[aria-pressed='true']::after { content: '🔊'; }
+#mascot .lk-say { position: absolute; bottom: calc(100% + 12px); right: 0; width: 228px; max-width: calc(100vw - 36px); min-height: 0; pointer-events: none; opacity: 0; visibility: hidden; }
+#mascot:hover .lk-say, #mascot:focus-within .lk-say { opacity: 1; visibility: visible; }
+#mascot .lk-bubble { max-width: 100%; font-size: 13px; }
+#mascot .lk-bubble::after { left: auto; right: 50px; }
+@media (max-width: 900px) { #mascot { width: 104px; right: max(12px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); } #mascot .lk-snd { width: 44px; height: 44px; min-height: 44px !important; } }
 @media (min-width: 901px) and (max-width: 1300px) {
   .workspace { grid-template-columns: minmax(0, 1fr) minmax(290px, .4fr); column-gap: 32px; }
   #state { font-size: 36px; }
@@ -210,11 +223,11 @@ summary { cursor: pointer; width: fit-content; }
       <span id="telemetry-status" class="sr-only">No data</span>
     </section>
   </div>
-  <section class="secondary" aria-label="Operator help and Hoot">
+  <section class="secondary" aria-label="Operator help">
     <details><summary>Steering &amp; voice help</summary><div class="help-content"><p id="camera-guidance">Look straight to center. Turn your head to steer.</p><p>Say “Rover forward,” “Rover reverse,” “Rover left,” or “Rover right.” Say “stop” or press Esc to stop, “resume” to drive again, or “recenter” to calibrate.</p><p>Forward motion pauses below 20 cm or when the front sensor has no echo. Motion pauses when tracking or rover data is lost.</p><p>The camera view is mirrored. Use desktop Chrome or Edge over HTTPS for USB.</p></div></details>
-    <div id="mascot" aria-label="Hoot rover companion"></div>
   </section>
 </main>
+<aside id="mascot" aria-label="Hoot rover companion"></aside>
 <script>
   class RedBoardConnection {
     ready = false;
